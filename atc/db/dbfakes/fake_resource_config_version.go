@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/concourse/concourse/atc/db"
+	"go.opentelemetry.io/otel/api/propagation"
 )
 
 type FakeResourceConfigVersion struct {
@@ -50,15 +51,15 @@ type FakeResourceConfigVersion struct {
 		result1 bool
 		result2 error
 	}
-	ResourceConfigScopeStub        func() db.ResourceConfigScope
-	resourceConfigScopeMutex       sync.RWMutex
-	resourceConfigScopeArgsForCall []struct {
+	SpanContextStub        func() propagation.HTTPSupplier
+	spanContextMutex       sync.RWMutex
+	spanContextArgsForCall []struct {
 	}
-	resourceConfigScopeReturns struct {
-		result1 db.ResourceConfigScope
+	spanContextReturns struct {
+		result1 propagation.HTTPSupplier
 	}
-	resourceConfigScopeReturnsOnCall map[int]struct {
-		result1 db.ResourceConfigScope
+	spanContextReturnsOnCall map[int]struct {
+		result1 propagation.HTTPSupplier
 	}
 	VersionStub        func() db.Version
 	versionMutex       sync.RWMutex
@@ -285,55 +286,55 @@ func (fake *FakeResourceConfigVersion) ReloadReturnsOnCall(i int, result1 bool, 
 	}{result1, result2}
 }
 
-func (fake *FakeResourceConfigVersion) ResourceConfigScope() db.ResourceConfigScope {
-	fake.resourceConfigScopeMutex.Lock()
-	ret, specificReturn := fake.resourceConfigScopeReturnsOnCall[len(fake.resourceConfigScopeArgsForCall)]
-	fake.resourceConfigScopeArgsForCall = append(fake.resourceConfigScopeArgsForCall, struct {
+func (fake *FakeResourceConfigVersion) SpanContext() propagation.HTTPSupplier {
+	fake.spanContextMutex.Lock()
+	ret, specificReturn := fake.spanContextReturnsOnCall[len(fake.spanContextArgsForCall)]
+	fake.spanContextArgsForCall = append(fake.spanContextArgsForCall, struct {
 	}{})
-	fake.recordInvocation("ResourceConfigScope", []interface{}{})
-	fake.resourceConfigScopeMutex.Unlock()
-	if fake.ResourceConfigScopeStub != nil {
-		return fake.ResourceConfigScopeStub()
+	fake.recordInvocation("SpanContext", []interface{}{})
+	fake.spanContextMutex.Unlock()
+	if fake.SpanContextStub != nil {
+		return fake.SpanContextStub()
 	}
 	if specificReturn {
 		return ret.result1
 	}
-	fakeReturns := fake.resourceConfigScopeReturns
+	fakeReturns := fake.spanContextReturns
 	return fakeReturns.result1
 }
 
-func (fake *FakeResourceConfigVersion) ResourceConfigScopeCallCount() int {
-	fake.resourceConfigScopeMutex.RLock()
-	defer fake.resourceConfigScopeMutex.RUnlock()
-	return len(fake.resourceConfigScopeArgsForCall)
+func (fake *FakeResourceConfigVersion) SpanContextCallCount() int {
+	fake.spanContextMutex.RLock()
+	defer fake.spanContextMutex.RUnlock()
+	return len(fake.spanContextArgsForCall)
 }
 
-func (fake *FakeResourceConfigVersion) ResourceConfigScopeCalls(stub func() db.ResourceConfigScope) {
-	fake.resourceConfigScopeMutex.Lock()
-	defer fake.resourceConfigScopeMutex.Unlock()
-	fake.ResourceConfigScopeStub = stub
+func (fake *FakeResourceConfigVersion) SpanContextCalls(stub func() propagation.HTTPSupplier) {
+	fake.spanContextMutex.Lock()
+	defer fake.spanContextMutex.Unlock()
+	fake.SpanContextStub = stub
 }
 
-func (fake *FakeResourceConfigVersion) ResourceConfigScopeReturns(result1 db.ResourceConfigScope) {
-	fake.resourceConfigScopeMutex.Lock()
-	defer fake.resourceConfigScopeMutex.Unlock()
-	fake.ResourceConfigScopeStub = nil
-	fake.resourceConfigScopeReturns = struct {
-		result1 db.ResourceConfigScope
+func (fake *FakeResourceConfigVersion) SpanContextReturns(result1 propagation.HTTPSupplier) {
+	fake.spanContextMutex.Lock()
+	defer fake.spanContextMutex.Unlock()
+	fake.SpanContextStub = nil
+	fake.spanContextReturns = struct {
+		result1 propagation.HTTPSupplier
 	}{result1}
 }
 
-func (fake *FakeResourceConfigVersion) ResourceConfigScopeReturnsOnCall(i int, result1 db.ResourceConfigScope) {
-	fake.resourceConfigScopeMutex.Lock()
-	defer fake.resourceConfigScopeMutex.Unlock()
-	fake.ResourceConfigScopeStub = nil
-	if fake.resourceConfigScopeReturnsOnCall == nil {
-		fake.resourceConfigScopeReturnsOnCall = make(map[int]struct {
-			result1 db.ResourceConfigScope
+func (fake *FakeResourceConfigVersion) SpanContextReturnsOnCall(i int, result1 propagation.HTTPSupplier) {
+	fake.spanContextMutex.Lock()
+	defer fake.spanContextMutex.Unlock()
+	fake.SpanContextStub = nil
+	if fake.spanContextReturnsOnCall == nil {
+		fake.spanContextReturnsOnCall = make(map[int]struct {
+			result1 propagation.HTTPSupplier
 		})
 	}
-	fake.resourceConfigScopeReturnsOnCall[i] = struct {
-		result1 db.ResourceConfigScope
+	fake.spanContextReturnsOnCall[i] = struct {
+		result1 propagation.HTTPSupplier
 	}{result1}
 }
 
@@ -400,8 +401,8 @@ func (fake *FakeResourceConfigVersion) Invocations() map[string][][]interface{} 
 	defer fake.metadataMutex.RUnlock()
 	fake.reloadMutex.RLock()
 	defer fake.reloadMutex.RUnlock()
-	fake.resourceConfigScopeMutex.RLock()
-	defer fake.resourceConfigScopeMutex.RUnlock()
+	fake.spanContextMutex.RLock()
+	defer fake.spanContextMutex.RUnlock()
 	fake.versionMutex.RLock()
 	defer fake.versionMutex.RUnlock()
 	copiedInvocations := map[string][][]interface{}{}

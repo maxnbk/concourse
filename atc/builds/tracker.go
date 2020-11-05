@@ -2,6 +2,9 @@ package builds
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"runtime/debug"
 	"sync"
 
 	"code.cloudfoundry.org/lager"
@@ -12,13 +15,10 @@ import (
 )
 
 func NewTracker(
-	logger lager.Logger,
-
 	buildFactory db.BuildFactory,
 	engine engine.Engine,
 ) *Tracker {
 	return &Tracker{
-		logger:       logger,
 		buildFactory: buildFactory,
 		engine:       engine,
 		running:      &sync.Map{},
@@ -34,37 +34,43 @@ type Tracker struct {
 	running *sync.Map
 }
 
-func (bt *Tracker) Track() error {
-	tLog := bt.logger.Session("track")
+func (bt *Tracker) Run(ctx context.Context) error {
+	logger := lagerctx.FromContext(ctx)
 
-	tLog.Debug("start")
-	defer tLog.Debug("done")
+	logger.Debug("start")
+	defer logger.Debug("done")
 
 	builds, err := bt.buildFactory.GetAllStartedBuilds()
 	if err != nil {
-		tLog.Error("failed-to-lookup-started-builds", err)
+		logger.Error("failed-to-lookup-started-builds", err)
 		return err
 	}
 
 	for _, b := range builds {
 		if _, exists := bt.running.LoadOrStore(b.ID(), true); !exists {
 			go func(build db.Build) {
+				loggerData := build.LagerData()
+				defer func() {
+					if r := recover(); r != nil {
+						err = fmt.Errorf("panic in tracker build run %s: %v", loggerData, r)
+
+						fmt.Fprintf(os.Stderr, "%s\n %s\n", err.Error(), string(debug.Stack()))
+						logger.Error("panic-in-tracker-build-run", err)
+
+						build.Finish(db.BuildStatusErrored)
+					}
+				}()
+
 				defer bt.running.Delete(build.ID())
 
-				metric.BuildsRunning.Inc()
-				defer metric.BuildsRunning.Dec()
+				metric.Metrics.BuildsRunning.Inc()
+				defer metric.Metrics.BuildsRunning.Dec()
 
-				ctx, cancel := context.WithCancel(context.Background())
 				bt.engine.NewBuild(build).Run(
 					lagerctx.NewContext(
-						ctx,
-						tLog.WithData(lager.Data{
-							"build":    build.ID(),
-							"pipeline": build.PipelineName(),
-							"job":      build.JobName(),
-						}),
+						context.Background(),
+						logger.Session("run", loggerData),
 					),
-					cancel,
 				)
 			}(b)
 		}
@@ -73,10 +79,6 @@ func (bt *Tracker) Track() error {
 	return nil
 }
 
-func (bt *Tracker) Release() {
-	rLog := bt.logger.Session("release")
-	rLog.Debug("start")
-	defer rLog.Debug("done")
-
-	bt.engine.ReleaseAll(rLog)
+func (bt *Tracker) Drain(ctx context.Context) {
+	bt.engine.Drain(ctx)
 }

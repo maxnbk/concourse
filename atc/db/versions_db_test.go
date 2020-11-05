@@ -7,7 +7,9 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
+	"github.com/concourse/concourse/atc"
 	"github.com/concourse/concourse/atc/db"
+	"github.com/concourse/concourse/atc/db/dbtest"
 	gocache "github.com/patrickmn/go-cache"
 )
 
@@ -724,6 +726,47 @@ var _ = Describe("VersionsDB", func() {
 				Expect(err).ToNot(HaveOccurred())
 				Expect(ok).To(BeFalse())
 				Expect(buildID).To(BeZero())
+			})
+		})
+	})
+
+	Describe("FindVersionOfResource", func() {
+		var (
+			scenario     *dbtest.Scenario
+			queryVersion atc.Version
+
+			resourceVersion db.ResourceVersion
+			found           bool
+		)
+
+		JustBeforeEach(func() {
+			var err error
+			resourceVersion, found, err = vdb.FindVersionOfResource(
+				ctx,
+				scenario.Resource("some-resource").ID(),
+				queryVersion,
+			)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		Context("when trying to find version by providing a matched partial version", func() {
+			var (
+				dbVersion atc.Version
+			)
+
+			BeforeEach(func() {
+				dbVersion = atc.Version{"tag": "v1", "commit": "v2"}
+
+				scenario = dbtest.Setup(
+					builder.WithResourceVersions("some-resource", dbVersion),
+				)
+
+				queryVersion = atc.Version{"tag": "v1"}
+			})
+
+			It("return the version md5", func() {
+				Expect(found).To(BeTrue())
+				Expect(string(resourceVersion)).To(Equal(convertToMD5(dbVersion)))
 			})
 		})
 	})

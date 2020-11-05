@@ -244,7 +244,7 @@ run: {path: a/file}
 			config       atc.TaskConfig
 			configSource TaskConfigSource
 
-			overrideParams atc.Params
+			overrideParams atc.TaskEnv
 
 			fetchedConfig atc.TaskConfig
 			fetchErr      error
@@ -261,7 +261,7 @@ run: {path: a/file}
 				},
 			}
 
-			overrideParams = atc.Params{"PARAM": "B", "EXTRA_PARAM": "C"}
+			overrideParams = atc.TaskEnv{"PARAM": "B", "EXTRA_PARAM": "C"}
 		})
 
 		Context("when there are no params to override", func() {
@@ -316,31 +316,6 @@ run: {path: a/file}
 				Expect(configSource.Warnings()).To(HaveLen(1))
 				Expect(configSource.Warnings()[0]).To(ContainSubstring("EXTRA_PARAM was defined in pipeline but missing from task file"))
 			})
-
-			Context("when params have int or float values", func() {
-				BeforeEach(func() {
-					overrideParams["int-val"] = float64(1059262)
-					overrideParams["float-val"] = float64(1059262.987345987)
-					configSource = &OverrideParamsConfigSource{
-						ConfigSource: StaticConfigSource{Config: &config},
-						Params:       overrideParams,
-					}
-				})
-
-				JustBeforeEach(func() {
-					fetchedConfig, fetchErr = configSource.FetchConfig(context.TODO(), logger, repo)
-				})
-
-				It("succeeds", func() {
-					Expect(fetchErr).NotTo(HaveOccurred())
-				})
-
-				It("processes them correctly", func() {
-					Expect(fetchedConfig.Params).To(HaveKeyWithValue("int-val", "1059262"))
-					Expect(fetchedConfig.Params).To(HaveKeyWithValue("float-val", "1059262.987345987"))
-				})
-			})
-
 		})
 	})
 
@@ -419,28 +394,127 @@ run: {path: a/file}
 			configSource  TaskConfigSource
 			fetchedConfig atc.TaskConfig
 			fetchErr      error
+			expectAllKeys bool
 		)
 
 		JustBeforeEach(func() {
 			configSource = StaticConfigSource{Config: &taskConfig}
-			configSource = InterpolateTemplateConfigSource{ConfigSource: configSource, Vars: []vars.Variables{vars.StaticVariables(taskVars)}}
+			configSource = InterpolateTemplateConfigSource{
+				ConfigSource:  configSource,
+				Vars:          []vars.Variables{vars.StaticVariables(taskVars)},
+				ExpectAllKeys: expectAllKeys,
+			}
 			fetchedConfig, fetchErr = configSource.FetchConfig(context.TODO(), logger, repo)
 		})
 
-		It("fetches task config successfully", func() {
-			Expect(fetchErr).ToNot(HaveOccurred())
+		Context("when expect all keys", func() {
+			BeforeEach(func() {
+				expectAllKeys = true
+			})
+
+			It("fetches task config successfully", func() {
+				Expect(fetchErr).ToNot(HaveOccurred())
+			})
+
+			It("resolves task config parameters successfully", func() {
+				Expect(fetchedConfig.Run.Args).To(Equal([]string{"-al", "task-variable-value"}))
+				Expect(fetchedConfig.Params).To(Equal(atc.TaskEnv{
+					"key1": "key1-task-variable-value",
+					"key2": "key2-task-variable-value",
+				}))
+				Expect(fetchedConfig.ImageResource.Source).To(Equal(atc.Source{
+					"a":               "b",
+					"evaluated-value": "task-variable-value",
+				}))
+			})
 		})
 
-		It("resolves task config parameters successfully", func() {
-			Expect(fetchedConfig.Run.Args).To(Equal([]string{"-al", "task-variable-value"}))
-			Expect(fetchedConfig.Params).To(Equal(atc.TaskEnv{
-				"key1": "key1-task-variable-value",
-				"key2": "key2-task-variable-value",
-			}))
-			Expect(fetchedConfig.ImageResource.Source).To(Equal(atc.Source{
-				"a":               "b",
-				"evaluated-value": "task-variable-value",
-			}))
+		Context("when not expect all keys", func() {
+			BeforeEach(func() {
+				expectAllKeys = false
+				taskVars = atc.Params{}
+			})
+
+			It("fetches task config successfully", func() {
+				Expect(fetchErr).ToNot(HaveOccurred())
+			})
+
+			It("resolves task config parameters successfully", func() {
+				Expect(fetchedConfig.Run.Args).To(Equal([]string{"-al", "((task-variable-name))"}))
+				Expect(fetchedConfig.Params).To(Equal(atc.TaskEnv{
+					"key1": "key1-((task-variable-name))",
+					"key2": "key2-((task-variable-name))",
+				}))
+				Expect(fetchedConfig.ImageResource.Source).To(Equal(atc.Source{
+					"a":               "b",
+					"evaluated-value": "((task-variable-name))",
+				}))
+			})
+		})
+	})
+
+	Context("BaseResourceTypeDefaultsApplySource", func() {
+		var (
+			configSource  TaskConfigSource
+			resourceTypes atc.VersionedResourceTypes
+			fetchedConfig atc.TaskConfig
+			fetchErr      error
+		)
+
+		JustBeforeEach(func() {
+			configSource = StaticConfigSource{Config: &taskConfig}
+			configSource = BaseResourceTypeDefaultsApplySource{
+				ConfigSource:  configSource,
+				ResourceTypes: resourceTypes,
+			}
+			fetchedConfig, fetchErr = configSource.FetchConfig(context.TODO(), logger, repo)
+		})
+
+		Context("resourceTypes is empty, and no base resource type defaults configured", func() {
+			It("fetchedConfig should be identical to the original", func() {
+				Expect(fetchErr).ToNot(HaveOccurred())
+				Expect(fetchedConfig).To(Equal(taskConfig))
+			})
+		})
+
+		Context("resourceTypes is empty, and base resource type defaults configured", func() {
+			BeforeEach(func() {
+				atc.LoadBaseResourceTypeDefaults(map[string]atc.Source{"docker": atc.Source{"some-key": "some-value"}})
+			})
+			AfterEach(func() {
+				atc.LoadBaseResourceTypeDefaults(map[string]atc.Source{})
+			})
+
+			It("defaults should be added to image source", func() {
+				Expect(fetchErr).ToNot(HaveOccurred())
+				Expect(fetchedConfig.ImageResource.Source).To(Equal(atc.Source{
+					"a":               "b",
+					"evaluated-value": "((task-variable-name))",
+					"some-key":        "some-value",
+				}))
+			})
+		})
+
+		Context("resourceTypes contains image source type", func() {
+			BeforeEach(func() {
+				resourceTypes = atc.VersionedResourceTypes{
+					{
+						ResourceType: atc.ResourceType{
+							Name:     "docker",
+							Defaults: atc.Source{"some-key": "some-value"},
+						},
+					},
+				}
+			})
+
+			It("defaults should be added to image source", func() {
+				Expect(fetchErr).ToNot(HaveOccurred())
+				Expect(fetchedConfig.ImageResource.Source).To(Equal(atc.Source{
+					"a":               "b",
+					"evaluated-value": "((task-variable-name))",
+					"some-key":        "some-value",
+				}))
+			})
 		})
 	})
 })

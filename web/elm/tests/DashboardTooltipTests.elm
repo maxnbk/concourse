@@ -2,10 +2,11 @@ module DashboardTooltipTests exposing (all)
 
 import Dashboard.Dashboard as Dashboard
 import Data
+import Dict
 import Expect
 import HoverState exposing (HoverState(..))
 import Html
-import Message.Message exposing (DomID(..))
+import Message.Message exposing (DomID(..), PipelinesSection(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector exposing (text)
@@ -18,16 +19,13 @@ all =
             \_ ->
                 Dashboard.tooltip
                     { pipelines =
-                        Just
-                            [ Data.dashboardPipeline 0 True ]
+                        Just <|
+                            Dict.fromList
+                                [ ( "team", [ Data.dashboardPipeline 0 True ] ) ]
                     }
                     { hovered =
                         Tooltip
-                            (VisibilityButton
-                                { teamName = Data.teamName
-                                , pipelineName = Data.pipelineName
-                                }
-                            )
+                            (VisibilityButton AllPipelinesSection Data.pipelineId)
                             Data.elementPosition
                     }
                     |> Maybe.map .body
@@ -38,16 +36,13 @@ all =
             \_ ->
                 Dashboard.tooltip
                     { pipelines =
-                        Just
-                            [ Data.dashboardPipeline 0 False ]
+                        Just <|
+                            Dict.fromList
+                                [ ( "team", [ Data.dashboardPipeline 0 False ] ) ]
                     }
                     { hovered =
                         Tooltip
-                            (VisibilityButton
-                                { teamName = Data.teamName
-                                , pipelineName = Data.pipelineName
-                                }
-                            )
+                            (VisibilityButton AllPipelinesSection Data.pipelineId)
                             Data.elementPosition
                     }
                     |> Maybe.map .body
@@ -62,16 +57,13 @@ all =
                 in
                 Dashboard.tooltip
                     { pipelines =
-                        Just
-                            [ { p | jobsDisabled = True } ]
+                        Just <|
+                            Dict.fromList
+                                [ ( "team", [ { p | jobsDisabled = True } ] ) ]
                     }
                     { hovered =
                         Tooltip
-                            (PipelineStatusIcon
-                                { teamName = Data.teamName
-                                , pipelineName = Data.pipelineName
-                                }
-                            )
+                            (PipelineStatusIcon AllPipelinesSection Data.pipelineId)
                             Data.elementPosition
                     }
                     |> Maybe.map .body

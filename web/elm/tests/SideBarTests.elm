@@ -6,7 +6,7 @@ import Data
 import Expect
 import HoverState
 import Message.Effects as Effects
-import Message.Message exposing (DomID(..), Message(..))
+import Message.Message exposing (DomID(..), Message(..), PipelinesSection(..))
 import RemoteData
 import ScreenSize
 import Set
@@ -37,19 +37,22 @@ all =
 
 model : SideBar.Model {}
 model =
-    { expandedTeams = Set.fromList [ "team" ]
+    { expandedTeamsInAllPipelines = Set.fromList [ "team" ]
+    , collapsedTeamsInFavorites = Set.empty
     , pipelines =
         RemoteData.Success
             [ Data.pipeline "team" 0 |> Data.withName "pipeline" ]
     , hovered = HoverState.NoHover
-    , isSideBarOpen = True
+    , sideBarState =
+        { isOpen = True
+        , width = 275
+        }
+    , draggingSideBar = False
     , screenSize = ScreenSize.Desktop
+    , favoritedPipelines = Set.empty
     }
 
 
 domID : DomID
 domID =
-    SideBarPipeline
-        { teamName = "team"
-        , pipelineName = "pipeline"
-        }
+    SideBarPipeline AllPipelinesSection Data.pipelineId

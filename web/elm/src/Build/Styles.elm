@@ -1,22 +1,24 @@
 module Build.Styles exposing
     ( MetadataCellType(..)
     , abortButton
+    , acrossStepSubHeaderLabel
     , body
     , buttonTooltip
     , buttonTooltipArrow
+    , changedStepTooltip
     , durationTooltip
-    , durationTooltipArrow
     , errorLog
-    , firstOccurrenceTooltip
     , header
     , historyItem
+    , imageSteps
+    , initializationToggle
     , metadataCell
     , metadataTable
-    , retryTab
     , retryTabList
     , stepHeader
     , stepHeaderLabel
     , stepStatusIcon
+    , tab
     , triggerButton
     )
 
@@ -28,6 +30,7 @@ import Concourse.BuildStatus exposing (BuildStatus(..))
 import Dashboard.Styles exposing (striped)
 import Html
 import Html.Attributes exposing (style)
+import Views.Styles
 
 
 header : BuildStatus -> List (Html.Attribute msg)
@@ -61,6 +64,7 @@ body : List (Html.Attribute msg)
 body =
     [ style "overflow-y" "auto"
     , style "outline" "none"
+    , style "position" "relative"
     , style "-webkit-overflow-scrolling" "touch"
     ]
 
@@ -164,9 +168,6 @@ buttonTooltip width =
     , style "width" <| String.fromInt width ++ "px"
     , style "color" Colors.text
     , style "background-color" Colors.frame
-    , style "font-size" "12px"
-    , style "font-family" "Inconsolata,monospace"
-    , style "font-weight" "700"
     , style "padding" "10px"
     , style "text-align" "right"
     , style "pointer-events" "none"
@@ -175,49 +176,54 @@ buttonTooltip width =
     -- ^ need a value greater than 0 (inherited from .fixed-header) since this
     -- element is earlier in the document than the build tabs
     ]
+        ++ Views.Styles.defaultFont
 
 
 stepHeader : StepState -> List (Html.Attribute msg)
 stepHeader state =
     [ style "display" "flex"
     , style "justify-content" "space-between"
-    , style "border" <|
-        "1px solid "
-            ++ (case state of
-                    StepStateFailed ->
-                        Colors.failure
+    , style "border-color" <|
+        case state of
+            StepStateFailed ->
+                Colors.failure
 
-                    StepStateErrored ->
-                        Colors.error
+            StepStateErrored ->
+                Colors.error
 
-                    StepStatePending ->
-                        Colors.frame
+            StepStatePending ->
+                "transparent"
 
-                    StepStateRunning ->
-                        Colors.started
+            StepStateRunning ->
+                Colors.started
 
-                    StepStateInterrupted ->
-                        Colors.frame
+            StepStateInterrupted ->
+                "transparent"
 
-                    StepStateCancelled ->
-                        Colors.frame
+            StepStateCancelled ->
+                "transparent"
 
-                    StepStateSucceeded ->
-                        Colors.frame
-               )
+            StepStateSucceeded ->
+                "transparent"
     ]
 
 
-stepHeaderLabel : StepHeaderType -> List (Html.Attribute msg)
-stepHeaderLabel headerType =
+stepHeaderLabel : Bool -> List (Html.Attribute msg)
+stepHeaderLabel changed =
     [ style "color" <|
-        case headerType of
-            StepHeaderGet True ->
-                Colors.started
+        if changed then
+            Colors.started
 
-            _ ->
-                Colors.pending
+        else
+            Colors.pending
     , style "line-height" "28px"
+    , style "padding-left" "6px"
+    ]
+
+
+acrossStepSubHeaderLabel : List (Html.Attribute msg)
+acrossStepSubHeaderLabel =
+    [ style "line-height" "28px"
     , style "padding-left" "6px"
     ]
 
@@ -229,12 +235,12 @@ stepStatusIcon =
     ]
 
 
-firstOccurrenceTooltip : List (Html.Attribute msg)
-firstOccurrenceTooltip =
+changedStepTooltip : List (Html.Attribute msg)
+changedStepTooltip =
     [ style "background-color" Colors.tooltipBackground
     , style "padding" "5px"
     , style "z-index" "100"
-    , style "width" "6em"
+    , style "width" "fit-content"
     , style "pointer-events" "none"
     ]
         ++ Application.Styles.disableInteraction
@@ -242,29 +248,13 @@ firstOccurrenceTooltip =
 
 durationTooltip : List (Html.Attribute msg)
 durationTooltip =
-    [ style "position" "absolute"
-    , style "right" "0"
-    , style "bottom" "100%"
-    , style "background-color" Colors.tooltipBackground
+    [ style "background-color" Colors.tooltipBackground
     , style "padding" "5px"
     , style "z-index" "100"
+    , style "width" "fit-content"
     , style "pointer-events" "none"
     ]
         ++ Application.Styles.disableInteraction
-
-
-durationTooltipArrow : List (Html.Attribute msg)
-durationTooltipArrow =
-    [ style "width" "0"
-    , style "height" "0"
-    , style "left" "50%"
-    , style "top" "0px"
-    , style "margin-left" "-5px"
-    , style "border-top" <| "5px solid " ++ Colors.tooltipBackground
-    , style "border-left" "5px solid transparent"
-    , style "border-right" "5px solid transparent"
-    , style "position" "absolute"
-    ]
 
 
 errorLog : List (Html.Attribute msg)
@@ -275,22 +265,28 @@ errorLog =
     ]
 
 
-retryTabList : List (Html.Attribute msg)
-retryTabList =
-    [ style "margin" "0"
-    , style "font-size" "16px"
-    , style "line-height" "26px"
+tabList : List (Html.Attribute msg)
+tabList =
+    [ style "line-height" "26px"
     , style "background-color" Colors.background
     ]
 
 
-retryTab :
+retryTabList : List (Html.Attribute msg)
+retryTabList =
+    style "font-size" "16px"
+        :: style "margin" "0"
+        :: tabList
+
+
+tab :
     { isHovered : Bool, isCurrent : Bool, isStarted : Bool }
     -> List (Html.Attribute msg)
-retryTab { isHovered, isCurrent, isStarted } =
+tab { isHovered, isCurrent, isStarted } =
     [ style "display" "inline-block"
+    , style "position" "relative"
     , style "padding" "0 5px"
-    , style "font-weight" "700"
+    , style "font-weight" Views.Styles.fontWeightDefault
     , style "cursor" "pointer"
     , style "color" Colors.retryTabText
     , style "background-color" <|
@@ -338,3 +334,27 @@ metadataCell cell =
             , style "border-bottom" "5px solid rgb(45,45,45)"
             , style "padding" "5px"
             ]
+
+
+imageSteps : List (Html.Attribute msg)
+imageSteps =
+    [ style "padding" "10px"
+    , style "background" Colors.backgroundDark
+    ]
+
+
+initializationToggle : Bool -> List (Html.Attribute msg)
+initializationToggle expanded =
+    [ style "color" <|
+        if expanded then
+            Colors.text
+
+        else
+            Colors.pending
+    , style "background" <|
+        if expanded then
+            Colors.backgroundDark
+
+        else
+            "transparent"
+    ]

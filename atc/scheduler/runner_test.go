@@ -10,6 +10,7 @@ import (
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
 	"github.com/concourse/concourse/atc"
+	"github.com/concourse/concourse/atc/component"
 	"github.com/concourse/concourse/atc/db/lock/lockfakes"
 	. "github.com/concourse/concourse/atc/scheduler"
 	"github.com/concourse/concourse/atc/scheduler/schedulerfakes"
@@ -37,7 +38,7 @@ var _ = Describe("Runner", func() {
 		job2RequestedTime time.Time
 		job3RequestedTime time.Time
 
-		schedulerRunner Runner
+		schedulerRunner component.Runnable
 		schedulerErr    error
 	)
 
@@ -281,6 +282,23 @@ var _ = Describe("Runner", func() {
 					BeforeEach(func() {
 						fakeScheduler.ScheduleReturnsOnCall(0, false, errors.New("error"))
 						fakeScheduler.ScheduleReturnsOnCall(1, false, nil)
+					})
+
+					It("does not update last scheduled", func() {
+						Expect(schedulerErr).ToNot(HaveOccurred())
+						Eventually(fakeJob2.UpdateLastScheduledCallCount).Should(Equal(1))
+						Consistently(fakeJob1.UpdateLastScheduledCallCount).Should(Equal(0))
+					})
+				})
+
+				Context("when job scheduling panic", func() {
+					BeforeEach(func() {
+						fakeScheduler.ScheduleStub = func(_ context.Context, _ lager.Logger, job db.SchedulerJob) (bool, error) {
+							if job.Name() == "some-job" {
+								panic("something went wrong")
+							}
+							return false, nil
+						}
 					})
 
 					It("does not update last scheduled", func() {

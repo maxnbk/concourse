@@ -76,27 +76,33 @@ var _ = Describe("Config API", func() {
 					Name:   "some-job",
 					Public: true,
 					Serial: true,
-					Plan: atc.PlanSequence{
+					PlanSequence: []atc.Step{
 						{
-							Get:      "some-input",
-							Resource: "some-resource",
-							Params:   atc.Params{"some-param": "some-value"},
+							Config: &atc.GetStep{
+								Name:     "some-input",
+								Resource: "some-resource",
+								Params:   atc.Params{"some-param": "some-value"},
+							},
 						},
 						{
-							Task:       "some-task",
-							Privileged: true,
-							TaskConfig: &atc.TaskConfig{
-								Platform:  "linux",
-								RootfsURI: "some-image",
-								Run: atc.TaskRunConfig{
-									Path: "/path/to/run",
+							Config: &atc.TaskStep{
+								Name:       "some-task",
+								Privileged: true,
+								Config: &atc.TaskConfig{
+									Platform:  "linux",
+									RootfsURI: "some-image",
+									Run: atc.TaskRunConfig{
+										Path: "/path/to/run",
+									},
 								},
 							},
 						},
 						{
-							Put:      "some-output",
-							Resource: "some-resource",
-							Params:   atc.Params{"some-param": "some-value"},
+							Config: &atc.PutStep{
+								Name:     "some-output",
+								Resource: "some-resource",
+								Params:   atc.Params{"some-param": "some-value"},
+							},
 						},
 					},
 				},
@@ -106,17 +112,22 @@ var _ = Describe("Config API", func() {
 
 	Describe("GET /api/v1/teams/:team_name/pipelines/:name/config", func() {
 		var (
+			request  *http.Request
 			response *http.Response
 		)
 
-		JustBeforeEach(func() {
-			req, err := requestGenerator.CreateRequest(atc.GetConfig, rata.Params{
+		BeforeEach(func() {
+			var err error
+			request, err = requestGenerator.CreateRequest(atc.GetConfig, rata.Params{
 				"team_name":     "a-team",
 				"pipeline_name": "something-else",
 			}, nil)
 			Expect(err).NotTo(HaveOccurred())
+		})
 
-			response, err = client.Do(req)
+		JustBeforeEach(func() {
+			var err error
+			response, err = client.Do(request)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -157,6 +168,60 @@ var _ = Describe("Config API", func() {
 							},
 						})
 						fakeTeam.PipelineReturns(fakePipeline, true, nil)
+					})
+
+					Context("when instance vars ar specified", func() {
+						Context("when instance vars are malformed", func() {
+							BeforeEach(func() {
+								query := request.URL.Query()
+								query.Add("instance_vars", "{")
+								request.URL.RawQuery = query.Encode()
+							})
+
+							It("returns 400", func() {
+								Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+							})
+
+							It("returns Content-Type 'application/json'", func() {
+								expectedHeaderEntries := map[string]string{
+									"Content-Type": "application/json",
+								}
+								Expect(response).Should(IncludeHeaderEntries(expectedHeaderEntries))
+							})
+
+							It("returns an error in the response body", func() {
+								Expect(ioutil.ReadAll(response.Body)).To(MatchJSON(`
+										{
+											"errors": [
+												"instance_vars is malformed: unexpected end of JSON input"
+											]
+										}`))
+							})
+
+							It("doesn't find the pipeline", func() {
+								Expect(dbTeam.PipelineCallCount()).To(Equal(0))
+							})
+						})
+
+						Context("when instance vars is valid", func() {
+							BeforeEach(func() {
+								query := request.URL.Query()
+								query.Add("instance_vars", "{\"branch\":\"feature\"}")
+								request.URL.RawQuery = query.Encode()
+
+								fakePipeline.InstanceVarsReturns(atc.InstanceVars{"branch": "feature"})
+							})
+
+							It("finds the pipeline", func() {
+								Expect(fakeTeam.PipelineCallCount()).To(Equal(1))
+
+								ref := fakeTeam.PipelineArgsForCall(0)
+								Expect(ref).To(Equal(atc.PipelineRef{
+									Name:         "something-else",
+									InstanceVars: atc.InstanceVars{"branch": "feature"},
+								}))
+							})
+						})
 					})
 
 					Context("when the pipeline config is found", func() {
@@ -287,6 +352,41 @@ var _ = Describe("Config API", func() {
 				fakeAccess.IsAuthorizedReturns(true)
 			})
 
+			Context("when an identifier is invalid", func() {
+
+				BeforeEach(func() {
+					var err error
+					request, err = requestGenerator.CreateRequest(atc.SaveConfig, rata.Params{
+						"team_name":     "_team",
+						"pipeline_name": "_pipeline",
+					}, nil)
+					Expect(err).NotTo(HaveOccurred())
+
+					request.Header.Set("Content-Type", "application/json")
+
+					payload, err := json.Marshal(pipelineConfig)
+					Expect(err).NotTo(HaveOccurred())
+
+					request.Body = gbytes.BufferWithBytes(payload)
+				})
+
+				It("returns warnings in the response body", func() {
+					Expect(ioutil.ReadAll(response.Body)).To(MatchJSON(`
+							{
+								"warnings": [
+									{
+										"type": "invalid_identifier",
+										"message": "pipeline: '_pipeline' is not a valid identifier: must start with a lowercase letter"
+									},
+									{
+										"type": "invalid_identifier",
+										"message": "team: '_team' is not a valid identifier: must start with a lowercase letter"
+									}
+								]
+							}`))
+				})
+			})
+
 			Context("when a config version is specified", func() {
 				BeforeEach(func() {
 					request.Header.Set(atc.ConfigVersionHeader, "42")
@@ -385,8 +485,8 @@ var _ = Describe("Config API", func() {
 						It("saves it initially paused", func() {
 							Expect(dbTeam.SavePipelineCallCount()).To(Equal(1))
 
-							name, savedConfig, id, initiallyPaused := dbTeam.SavePipelineArgsForCall(0)
-							Expect(name).To(Equal("a-pipeline"))
+							ref, savedConfig, id, initiallyPaused := dbTeam.SavePipelineArgsForCall(0)
+							Expect(ref.Name).To(Equal("a-pipeline"))
 							Expect(savedConfig).To(Equal(pipelineConfig))
 							Expect(id).To(Equal(db.ConfigVersion(42)))
 							Expect(initiallyPaused).To(BeTrue())
@@ -483,8 +583,8 @@ var _ = Describe("Config API", func() {
 						It("saves it initially paused", func() {
 							Expect(dbTeam.SavePipelineCallCount()).To(Equal(1))
 
-							name, savedConfig, id, initiallyPaused := dbTeam.SavePipelineArgsForCall(0)
-							Expect(name).To(Equal("a-pipeline"))
+							ref, savedConfig, id, initiallyPaused := dbTeam.SavePipelineArgsForCall(0)
+							Expect(ref.Name).To(Equal("a-pipeline"))
 							Expect(savedConfig).To(Equal(pipelineConfig))
 							Expect(id).To(Equal(db.ConfigVersion(42)))
 							Expect(initiallyPaused).To(BeTrue())
@@ -530,8 +630,8 @@ jobs:
 							It("saves it", func() {
 								Expect(dbTeam.SavePipelineCallCount()).To(Equal(1))
 
-								name, savedConfig, id, initiallyPaused := dbTeam.SavePipelineArgsForCall(0)
-								Expect(name).To(Equal("a-pipeline"))
+								ref, savedConfig, id, initiallyPaused := dbTeam.SavePipelineArgsForCall(0)
+								Expect(ref.Name).To(Equal("a-pipeline"))
 								Expect(savedConfig).To(Equal(atc.Config{
 									Resources: []atc.ResourceConfig{
 										{
@@ -545,23 +645,27 @@ jobs:
 									Jobs: atc.JobConfigs{
 										{
 											Name: "some-job",
-											Plan: atc.PlanSequence{
+											PlanSequence: []atc.Step{
 												{
-													Get: "some-resource",
+													Config: &atc.GetStep{
+														Name: "some-resource",
+													},
 												},
 												{
-													Task: "some-task",
-													TaskConfig: &atc.TaskConfig{
-														Platform: "linux",
+													Config: &atc.TaskStep{
+														Name: "some-task",
+														Config: &atc.TaskConfig{
+															Platform: "linux",
 
-														Run: atc.TaskRunConfig{
-															Path: "ls",
-														},
+															Run: atc.TaskRunConfig{
+																Path: "ls",
+															},
 
-														Params: atc.TaskEnv{
-															"FOO": "true",
-															"BAR": "1",
-															"BAZ": "1.9",
+															Params: atc.TaskEnv{
+																"FOO": "true",
+																"BAR": "1",
+																"BAZ": "1.9",
+															},
 														},
 													},
 												},
@@ -624,7 +728,13 @@ resource_types:
 - name: some-type
   type: some-base-resource-type
   source:
-    FOO: ((BAR))`
+    FOO: ((BAR))
+
+jobs:
+- name: some-job
+  plan:
+  - task: some-task
+    file: some/task/config.yaml`
 
 									request.Header.Set("Content-Type", "application/x-yaml")
 									request.Body = ioutil.NopCloser(bytes.NewBufferString(payload))
@@ -722,6 +832,31 @@ jobs:
 								ExpectCredsValidationPass()
 								ExpectCredsValidationFail()
 							})
+
+							Context("when it contains nested task that uses external config file and params in task vars", func() {
+								BeforeEach(func() {
+									payload = `---
+resources:
+- name: some-resource
+  type: some-type
+  check_every: 10s
+jobs:
+- name: some-job
+  plan:
+  - get: some-resource
+  - do:
+    - task: some-task
+      file: some-resource/config.yml
+      vars:
+        FOO: ((BAR))`
+
+									request.Header.Set("Content-Type", "application/x-yaml")
+									request.Body = ioutil.NopCloser(bytes.NewBufferString(payload))
+								})
+
+								ExpectCredsValidationPass()
+								ExpectCredsValidationFail()
+							})
 						})
 
 						Context("when it contains credentials to be interpolated", func() {
@@ -758,21 +893,25 @@ jobs:
 									Jobs: atc.JobConfigs{
 										{
 											Name: "some-job",
-											Plan: atc.PlanSequence{
+											PlanSequence: []atc.Step{
 												{
-													Get: "some-resource",
+													Config: &atc.GetStep{
+														Name: "some-resource",
+													},
 												},
 												{
-													Task: "some-task",
-													TaskConfig: &atc.TaskConfig{
-														Platform: "linux",
+													Config: &atc.TaskStep{
+														Name: "some-task",
+														Config: &atc.TaskConfig{
+															Platform: "linux",
 
-														Run: atc.TaskRunConfig{
-															Path: "ls",
-														},
+															Run: atc.TaskRunConfig{
+																Path: "ls",
+															},
 
-														Params: atc.TaskEnv{
-															"FOO": "((BAR))",
+															Params: atc.TaskEnv{
+																"FOO": "((BAR))",
+															},
 														},
 													},
 												},
@@ -800,8 +939,8 @@ jobs:
 									It("passes validation and saves it un-interpolated", func() {
 										Expect(dbTeam.SavePipelineCallCount()).To(Equal(1))
 
-										name, savedConfig, id, initiallyPaused := dbTeam.SavePipelineArgsForCall(0)
-										Expect(name).To(Equal("a-pipeline"))
+										ref, savedConfig, id, initiallyPaused := dbTeam.SavePipelineArgsForCall(0)
+										Expect(ref.Name).To(Equal("a-pipeline"))
 										Expect(savedConfig).To(Equal(payloadAsConfig))
 										Expect(id).To(Equal(db.ConfigVersion(42)))
 										Expect(initiallyPaused).To(BeTrue())
@@ -906,7 +1045,91 @@ jobs:
 								Expect(dbTeam.SavePipelineCallCount()).To(BeZero())
 							})
 						})
+
+						Context("when instance vars are specified", func() {
+							Context("when instance vars are malformed", func() {
+								BeforeEach(func() {
+									query := request.URL.Query()
+									query.Add("instance_vars", "{")
+									request.URL.RawQuery = query.Encode()
+								})
+
+								It("returns 400", func() {
+									Expect(response.StatusCode).To(Equal(http.StatusBadRequest))
+								})
+
+								It("returns Content-Type 'application/json'", func() {
+									expectedHeaderEntries := map[string]string{
+										"Content-Type": "application/json",
+									}
+									Expect(response).Should(IncludeHeaderEntries(expectedHeaderEntries))
+								})
+
+								It("returns an error in the response body", func() {
+									Expect(ioutil.ReadAll(response.Body)).To(MatchJSON(`
+										{
+											"errors": [
+												"instance_vars is malformed: unexpected end of JSON input"
+											]
+										}`))
+								})
+
+								It("does not save anything", func() {
+									Expect(dbTeam.SavePipelineCallCount()).To(Equal(0))
+								})
+							})
+
+							Context("when instance vars is valid", func() {
+								BeforeEach(func() {
+									query := request.URL.Query()
+									query.Add("instance_vars", "{\"branch\":\"feature\"}")
+									request.URL.RawQuery = query.Encode()
+								})
+
+								It("saves an instanced pipeline", func() {
+									Expect(dbTeam.SavePipelineCallCount()).To(Equal(1))
+
+									ref, _, _, _ := dbTeam.SavePipelineArgsForCall(0)
+									Expect(ref).To(Equal(atc.PipelineRef{
+										Name:         "a-pipeline",
+										InstanceVars: atc.InstanceVars{"branch": "feature"},
+									}))
+								})
+							})
+						})
 					})
+
+					Context("there is a problem fetching the team", func() {
+						BeforeEach(func() {
+							request.Header.Set("Content-Type", "application/json")
+
+							payload, err := json.Marshal(pipelineConfig)
+							Expect(err).NotTo(HaveOccurred())
+
+							request.Body = gbytes.BufferWithBytes(payload)
+						})
+
+						Context("when the team is not found", func() {
+							BeforeEach(func() {
+								dbTeamFactory.FindTeamReturns(nil, false, nil)
+							})
+
+							It("returns 404", func() {
+								Expect(response.StatusCode).To(Equal(http.StatusNotFound))
+							})
+						})
+
+						Context("when finding the team fails", func() {
+							BeforeEach(func() {
+								dbTeamFactory.FindTeamReturns(nil, false, errors.New("failed"))
+							})
+
+							It("returns 500", func() {
+								Expect(response.StatusCode).To(Equal(http.StatusInternalServerError))
+							})
+						})
+					})
+
 				})
 
 				Context("when the Content-Type is unsupported", func() {
@@ -943,7 +1166,7 @@ jobs:
 								{
 									"name":   "some-job",
 									"public": true,
-									"plan":   atc.PlanSequence{},
+									"plan":   []atc.Step{},
 								},
 							},
 						})
@@ -966,14 +1189,14 @@ jobs:
 					It("saves it", func() {
 						Expect(dbTeam.SavePipelineCallCount()).To(Equal(1))
 
-						name, savedConfig, id, initiallyPaused := dbTeam.SavePipelineArgsForCall(0)
-						Expect(name).To(Equal("a-pipeline"))
+						ref, savedConfig, id, initiallyPaused := dbTeam.SavePipelineArgsForCall(0)
+						Expect(ref.Name).To(Equal("a-pipeline"))
 						Expect(savedConfig).To(Equal(atc.Config{
 							Jobs: atc.JobConfigs{
 								{
-									Name:   "some-job",
-									Public: true,
-									Plan:   atc.PlanSequence{},
+									Name:         "some-job",
+									Public:       true,
+									PlanSequence: []atc.Step{},
 								},
 							},
 						}))
@@ -993,7 +1216,7 @@ jobs:
 								{
 									"name":  "some-job",
 									"pubic": true,
-									"plan":  atc.PlanSequence{},
+									"plan":  []atc.Step{},
 								},
 							},
 						})

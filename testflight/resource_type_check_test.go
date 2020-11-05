@@ -17,6 +17,9 @@ var _ = Describe("Resource-types checks", func() {
 			"fixtures/resource-types.yml",
 			"-v", "hash="+hash.String(),
 		)
+
+		checkS := fly("check-resource", "-r", inPipeline("my-resource-image"))
+		Eventually(checkS).Should(gbytes.Say("succeeded"))
 	})
 
 	It("can check the resource-type", func() {
@@ -45,7 +48,7 @@ var _ = Describe("Resource-types checks", func() {
 	Context("when the resource-type check fails", func() {
 		It("fails", func() {
 			watch := spawnFly("check-resource-type", "-r", inPipeline("failing-custom-resource-type"))
-			Eventually(watch.Out).Should(gbytes.Say("errored"))
+			Eventually(watch.Out).Should(gbytes.Say("failed"))
 			Eventually(watch).Should(gexec.Exit(1))
 		})
 	})

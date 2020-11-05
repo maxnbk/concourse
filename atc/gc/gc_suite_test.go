@@ -12,6 +12,7 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/concourse/concourse/atc"
 	"github.com/concourse/concourse/atc/db"
+	"github.com/concourse/concourse/atc/db/dbtest"
 	"github.com/concourse/concourse/atc/db/lock"
 	"github.com/concourse/concourse/atc/postgresrunner"
 	. "github.com/onsi/ginkgo"
@@ -46,15 +47,19 @@ var (
 
 	teamFactory db.TeamFactory
 
-	defaultTeam     db.Team
-	defaultPipeline db.Pipeline
-	defaultJob      db.Job
-	defaultBuild    db.Build
+	defaultTeam        db.Team
+	defaultPipeline    db.Pipeline
+	defaultPipelineRef atc.PipelineRef
+	defaultJob         db.Job
+	defaultBuild       db.Build
 
 	usedResource     db.Resource
 	usedResourceType db.ResourceType
-	logger           *lagertest.TestLogger
-	fakeLogFunc      = func(logger lager.Logger, id lock.LockID) {}
+
+	builder dbtest.Builder
+
+	logger      *lagertest.TestLogger
+	fakeLogFunc = func(logger lager.Logger, id lock.LockID) {}
 )
 
 var _ = BeforeSuite(func() {
@@ -73,6 +78,8 @@ var _ = BeforeEach(func() {
 	dbConn = postgresRunner.OpenConn()
 
 	lockFactory = lock.NewLockFactory(postgresRunner.OpenSingleton(), fakeLogFunc, fakeLogFunc)
+
+	builder = dbtest.NewBuilder(dbConn, lockFactory)
 
 	teamFactory = db.NewTeamFactory(dbConn, lockFactory)
 	buildFactory = db.NewBuildFactory(dbConn, lockFactory, 0, time.Hour)
@@ -108,7 +115,8 @@ var _ = BeforeEach(func() {
 		},
 	}
 
-	defaultPipeline, _, err = defaultTeam.SavePipeline("default-pipeline", atcConfig, db.ConfigVersion(0), false)
+	defaultPipelineRef = atc.PipelineRef{Name: "default-pipeline"}
+	defaultPipeline, _, err = defaultTeam.SavePipeline(defaultPipelineRef, atcConfig, db.ConfigVersion(0), false)
 	Expect(err).NotTo(HaveOccurred())
 
 	var found bool

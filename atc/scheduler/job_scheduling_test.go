@@ -2,6 +2,7 @@ package scheduler_test
 
 import (
 	"errors"
+	"fmt"
 
 	"code.cloudfoundry.org/lager"
 	"github.com/concourse/concourse/atc"
@@ -256,11 +257,11 @@ type Result struct {
 }
 
 func (example Example) Run() {
-	fakeFactory := new(schedulerfakes.FakeBuildFactory)
+	fakePlanner := new(schedulerfakes.FakeBuildPlanner)
 	fakeAlgorithm := new(schedulerfakes.FakeAlgorithm)
 	fakeAlgorithm.ComputeReturns(nil, true, false, nil)
 
-	buildStarter := scheduler.NewBuildStarter(fakeFactory, fakeAlgorithm)
+	buildStarter := scheduler.NewBuildStarter(fakePlanner, fakeAlgorithm)
 
 	fakeJob := new(dbfakes.FakeJob)
 	fakeJob.ConfigReturns(atc.JobConfig{}, nil)
@@ -271,7 +272,7 @@ func (example Example) Run() {
 	for i, build := range example.Job.Builds {
 		fakeBuild := new(dbfakes.FakeBuild)
 		fakeBuild.IDReturns(build.ID)
-		fakeBuild.NameReturns(string(build.ID))
+		fakeBuild.NameReturns(fmt.Sprint(build.ID))
 		fakeBuild.IsAbortedReturns(build.Aborted)
 		fakeBuild.RerunOfReturns(build.RerunOfBuildID)
 		fakeBuild.IsManuallyTriggeredReturns(build.ManuallyTriggered)
@@ -298,9 +299,9 @@ func (example Example) Run() {
 		}
 
 		if build.CreatingBuildPlanFails {
-			fakeFactory.CreateReturns(atc.Plan{}, errors.New("disaster"))
+			fakePlanner.CreateReturns(atc.Plan{}, errors.New("disaster"))
 		} else {
-			fakeFactory.CreateReturns(atc.Plan{}, nil)
+			fakePlanner.CreateReturns(atc.Plan{}, nil)
 		}
 
 		if build.UnableToStart {

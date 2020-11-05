@@ -6,7 +6,6 @@ module Dashboard.Styles exposing
     , content
     , dropdownContainer
     , dropdownItem
-    , highDensityIcon
     , highDensityToggle
     , info
     , infoBar
@@ -26,6 +25,8 @@ module Dashboard.Styles exposing
     , noResults
     , pipelineCard
     , pipelineCardBanner
+    , pipelineCardBannerArchived
+    , pipelineCardBannerArchivedHd
     , pipelineCardBannerHd
     , pipelineCardBannerStale
     , pipelineCardBannerStaleHd
@@ -38,6 +39,7 @@ module Dashboard.Styles exposing
     , pipelineCardTransitionAgeStale
     , pipelineName
     , pipelinePreviewGrid
+    , pipelineSectionHeader
     , pipelineStatusIcon
     , previewPlaceholder
     , resourceErrorTriangle
@@ -45,9 +47,11 @@ module Dashboard.Styles exposing
     , searchClearButton
     , searchContainer
     , searchInput
+    , showArchivedToggle
     , showSearchContainer
     , striped
     , teamNameHd
+    , topBarContent
     , topCliIcon
     , visibilityToggle
     , visibilityTooltip
@@ -67,6 +71,7 @@ import Dashboard.PipelineGrid.Constants as PipelineGridConstants
 import Html
 import Html.Attributes exposing (style)
 import ScreenSize exposing (ScreenSize(..))
+import Views.Styles
 
 
 content : Bool -> List (Html.Attribute msg)
@@ -131,6 +136,13 @@ pipelineCardBannerStale =
     ]
 
 
+pipelineCardBannerArchived : List (Html.Attribute msg)
+pipelineCardBannerArchived =
+    [ style "height" "7px"
+    , style "background-color" Colors.backgroundDark
+    ]
+
+
 pipelineStatusIcon : List (Html.Attribute msg)
 pipelineStatusIcon =
     [ style "background-size" "contain" ]
@@ -173,7 +185,6 @@ noPipelineCardHeader =
     , style "letter-spacing" "0.1em"
     , style "padding" "12.5px"
     , style "text-align" "center"
-    , style "-webkit-font-smoothing" "antialiased"
     ]
 
 
@@ -183,7 +194,6 @@ pipelineCardHeader =
     , style "color" Colors.dashboardText
     , style "font-size" "1.5em"
     , style "letter-spacing" "0.1em"
-    , style "-webkit-font-smoothing" "antialiased"
     , style "padding" "12.5px"
     ]
 
@@ -299,6 +309,13 @@ pipelineCardBannerStaleHd : List (Html.Attribute msg)
 pipelineCardBannerStaleHd =
     [ style "width" "8px"
     , style "background-color" Colors.unknown
+    ]
+
+
+pipelineCardBannerArchivedHd : List (Html.Attribute msg)
+pipelineCardBannerArchivedHd =
+    [ style "width" "8px"
+    , style "background-color" Colors.backgroundDark
     ]
 
 
@@ -439,22 +456,15 @@ highDensityToggle : List (Html.Attribute msg)
 highDensityToggle =
     [ style "color" Colors.bottomBarText
     , style "margin-right" "20px"
-    , style "display" "flex"
     , style "text-transform" "uppercase"
-    , style "align-items" "center"
     ]
 
 
-highDensityIcon : Bool -> List (Html.Attribute msg)
-highDensityIcon highDensity =
-    [ style "background-image" <|
-        Assets.backgroundImage <|
-            Just (Assets.HighDensityIcon highDensity)
-    , style "background-size" "contain"
-    , style "height" "20px"
-    , style "width" "35px"
-    , style "flex-shrink" "0"
-    , style "margin-right" "10px"
+showArchivedToggle : List (Html.Attribute msg)
+showArchivedToggle =
+    [ style "margin-right" "10px"
+    , style "padding-left" "10px"
+    , style "border-left" <| "1px solid " ++ Colors.background
     ]
 
 
@@ -519,10 +529,9 @@ welcomeCard =
     [ style "background-color" Colors.card
     , style "margin" "25px"
     , style "padding" "40px"
-    , style "-webkit-font-smoothing" "antialiased"
     , style "position" "relative"
     , style "overflow" "hidden"
-    , style "font-weight" "400"
+    , style "font-weight" Views.Styles.fontWeightLight
     , style "display" "flex"
     , style "flex-direction" "column"
     ]
@@ -575,6 +584,14 @@ noResults =
     ]
 
 
+topBarContent : List (Html.Attribute msg)
+topBarContent =
+    [ style "display" "flex"
+    , style "flex-grow" "1"
+    , style "justify-content" "center"
+    ]
+
+
 searchContainer : ScreenSize -> List (Html.Attribute msg)
 searchContainer screenSize =
     [ style "display" "flex"
@@ -613,11 +630,12 @@ searchInput screenSize =
     , style "background-repeat" "no-repeat"
     , style "background-position" "12px 8px"
     , style "height" "30px"
+    , style "min-height" "30px"
     , style "padding" "0 42px"
     , style "border" <| "1px solid " ++ Colors.inputOutline
     , style "color" Colors.dashboardText
     , style "font-size" "1.15em"
-    , style "font-family" "Inconsolata, monospace"
+    , style "font-family" Views.Styles.fontFamilyDefault
     , style "outline" "0"
     ]
         ++ widthStyles
@@ -837,4 +855,12 @@ loadingView =
     , style "align-items" "center"
     , style "width" "100%"
     , style "height" "100%"
+    ]
+
+
+pipelineSectionHeader : List (Html.Attribute msg)
+pipelineSectionHeader =
+    [ style "font-size" "22px"
+    , style "font-weight" Views.Styles.fontWeightBold
+    , style "padding" "30px 0 10px 37.5px"
     ]

@@ -4,6 +4,7 @@ module Tooltip exposing
     , Model
     , Tooltip
     , handleCallback
+    , handleDelivery
     , view
     )
 
@@ -11,10 +12,11 @@ import Browser.Dom
 import EffectTransformer exposing (ET)
 import HoverState exposing (TooltipPosition(..))
 import Html exposing (Html)
-import Html.Attributes exposing (style)
+import Html.Attributes exposing (id, style)
 import Message.Callback exposing (Callback(..))
 import Message.Effects as Effects
 import Message.Message exposing (DomID(..), Message)
+import Message.Subscription exposing (Delivery(..), Interval(..))
 
 
 type alias Model m =
@@ -54,7 +56,7 @@ type alias AttachPosition =
 
 type Direction
     = Top
-    | Right
+    | Right Float
 
 
 type Alignment
@@ -66,10 +68,10 @@ type Alignment
 policy : DomID -> TooltipCondition
 policy domID =
     case domID of
-        SideBarPipeline _ ->
+        SideBarPipeline _ _ ->
             OnlyShowWhenOverflowing
 
-        SideBarTeam _ ->
+        SideBarTeam _ _ ->
             OnlyShowWhenOverflowing
 
         _ ->
@@ -87,13 +89,13 @@ position { direction, alignment } { element, viewport } =
                 ( Top, _ ) ->
                     [ style "bottom" <| String.fromFloat (viewport.height - target.y) ++ "px" ]
 
-                ( Right, Start ) ->
+                ( Right _, Start ) ->
                     [ style "top" <| String.fromFloat target.y ++ "px" ]
 
-                ( Right, Middle height ) ->
+                ( Right _, Middle height ) ->
                     [ style "top" <| String.fromFloat (target.y + (target.height - height) / 2) ++ "px" ]
 
-                ( Right, End ) ->
+                ( Right _, End ) ->
                     [ style "bottom" <| String.fromFloat (viewport.height - target.y - target.height) ++ "px" ]
 
         horizontal =
@@ -107,8 +109,8 @@ position { direction, alignment } { element, viewport } =
                 ( Top, End ) ->
                     [ style "right" <| String.fromFloat (viewport.width - target.x - target.width) ++ "px" ]
 
-                ( Right, _ ) ->
-                    [ style "left" <| String.fromFloat (target.x + target.width) ++ "px" ]
+                ( Right offset, _ ) ->
+                    [ style "left" <| String.fromFloat (target.x + target.width + offset) ++ "px" ]
     in
     [ style "position" "fixed", style "z-index" "100" ] ++ vertical ++ horizontal
 
@@ -158,7 +160,7 @@ arrowView { direction } target { size, color } =
                 , style "margin-bottom" <| "-" ++ String.fromFloat size ++ "px"
                 ]
 
-            Right ->
+            Right _ ->
                 [ style "border-right" <| String.fromFloat size ++ "px solid " ++ color
                 , style "border-top" <| String.fromFloat size ++ "px solid transparent"
                 , style "border-bottom" <| String.fromFloat size ++ "px solid transparent"
@@ -176,10 +178,30 @@ view : Model m -> Tooltip -> Html Message
 view { hovered } { body, attachPosition, arrow } =
     case ( hovered, arrow ) of
         ( HoverState.Tooltip _ target, a ) ->
-            Html.div (position attachPosition target)
+            Html.div (id "tooltips" :: position attachPosition target)
                 [ Maybe.map (arrowView attachPosition target) a |> Maybe.withDefault (Html.text "")
                 , body
                 ]
 
         _ ->
             Html.text ""
+
+
+handleDelivery : { a | hovered : HoverState.HoverState } -> Delivery -> ET m
+handleDelivery session delivery ( model, effects ) =
+    case delivery of
+        ClockTicked OneSecond _ ->
+            ( model
+            , effects
+                ++ (case session.hovered of
+                        HoverState.Hovered domID ->
+                            [ Effects.GetViewportOf domID
+                            ]
+
+                        _ ->
+                            []
+                   )
+            )
+
+        _ ->
+            ( model, effects )

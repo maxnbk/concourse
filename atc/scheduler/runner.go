@@ -3,12 +3,17 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"os"
+	"runtime/debug"
+	"strconv"
 	"sync"
 	"time"
 
 	"code.cloudfoundry.org/lager"
 	"github.com/concourse/concourse/atc/db"
 	"github.com/concourse/concourse/atc/metric"
+	"github.com/concourse/concourse/tracing"
+	"go.opentelemetry.io/otel/label"
 )
 
 //go:generate counterfeiter . BuildScheduler
@@ -21,7 +26,7 @@ type BuildScheduler interface {
 	) (bool, error)
 }
 
-type schedulerRunner struct {
+type Runner struct {
 	logger     lager.Logger
 	jobFactory db.JobFactory
 	scheduler  BuildScheduler
@@ -30,23 +35,24 @@ type schedulerRunner struct {
 	running            *sync.Map
 }
 
-func NewRunner(logger lager.Logger, jobFactory db.JobFactory, scheduler BuildScheduler, maxJobs uint64) Runner {
-	newGuardJobScheduling := make(chan struct{}, maxJobs)
-	return &schedulerRunner{
+func NewRunner(logger lager.Logger, jobFactory db.JobFactory, scheduler BuildScheduler, maxJobs uint64) *Runner {
+	return &Runner{
 		logger:     logger,
 		jobFactory: jobFactory,
 		scheduler:  scheduler,
 
-		guardJobScheduling: newGuardJobScheduling,
+		guardJobScheduling: make(chan struct{}, maxJobs),
 		running:            &sync.Map{},
 	}
 }
 
-func (s *schedulerRunner) Run(ctx context.Context) error {
+func (s *Runner) Run(ctx context.Context) error {
 	sLog := s.logger.Session("run")
 
 	sLog.Debug("start")
 	defer sLog.Debug("done")
+	spanCtx, span := tracing.StartSpan(ctx, "scheduler.Run", nil)
+	defer span.End()
 
 	jobs, err := s.jobFactory.JobsToSchedule()
 	if err != nil {
@@ -64,6 +70,20 @@ func (s *schedulerRunner) Run(ctx context.Context) error {
 		jLog := sLog.Session("job", lager.Data{"job": j.Name()})
 
 		go func(job db.SchedulerJob) {
+			loggerData := lager.Data{
+				"job_id":        strconv.Itoa(job.ID()),
+				"job_name":      job.Name(),
+				"pipeline_name": job.PipelineName(),
+				"team_name":     job.TeamName(),
+			}
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("panic in scheduler run %s: %v", loggerData, r)
+
+					fmt.Fprintf(os.Stderr, "%s\n %s\n", err.Error(), string(debug.Stack()))
+					jLog.Error("panic-in-scheduler-run", err)
+				}
+			}()
 			defer func() {
 				<-s.guardJobScheduling
 				s.running.Delete(job.ID())
@@ -81,7 +101,7 @@ func (s *schedulerRunner) Run(ctx context.Context) error {
 
 			defer schedulingLock.Release()
 
-			err = s.scheduleJob(ctx, sLog, job)
+			err = s.scheduleJob(spanCtx, sLog, job)
 			if err != nil {
 				jLog.Error("failed-to-schedule-job", err)
 			}
@@ -91,12 +111,18 @@ func (s *schedulerRunner) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *schedulerRunner) scheduleJob(ctx context.Context, logger lager.Logger, job db.SchedulerJob) error {
-	metric.JobsScheduling.Inc()
-	defer metric.JobsScheduling.Dec()
-	defer metric.JobsScheduled.Inc()
+func (s *Runner) scheduleJob(ctx context.Context, logger lager.Logger, job db.SchedulerJob) error {
+	metric.Metrics.JobsScheduling.Inc()
+	defer metric.Metrics.JobsScheduling.Dec()
+	defer metric.Metrics.JobsScheduled.Inc()
 
 	logger = logger.Session("schedule-job", lager.Data{"job": job.Name()})
+	spanCtx, span := tracing.StartSpan(ctx, "schedule-job", tracing.Attrs{
+		"team":     job.TeamName(),
+		"pipeline": job.PipelineName(),
+		"job":      job.Name(),
+	})
+	defer span.End()
 
 	logger.Debug("schedule")
 
@@ -118,7 +144,7 @@ func (s *schedulerRunner) scheduleJob(ctx context.Context, logger lager.Logger, 
 	jStart := time.Now()
 
 	needsRetry, err := s.scheduler.Schedule(
-		ctx,
+		spanCtx,
 		logger,
 		job,
 	)
@@ -126,6 +152,7 @@ func (s *schedulerRunner) scheduleJob(ctx context.Context, logger lager.Logger, 
 		return fmt.Errorf("schedule job: %w", err)
 	}
 
+	span.SetAttributes(label.Bool("needs-retry", needsRetry))
 	if !needsRetry {
 		err = job.UpdateLastScheduled(requestedTime)
 		if err != nil {

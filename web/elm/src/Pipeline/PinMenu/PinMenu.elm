@@ -14,18 +14,17 @@ import HoverState
 import Html exposing (Html)
 import Html.Attributes exposing (id, style)
 import Html.Events exposing (onClick, onMouseEnter, onMouseLeave)
-import Json.Decode
-import Json.Encode
 import Message.Message exposing (DomID(..), Message(..))
 import Pipeline.PinMenu.Styles as Styles
 import Pipeline.PinMenu.Views as Views
 import Routes
 import SideBar.Styles as SS
+import Views.Styles
 
 
 type alias Model b =
     { b
-        | fetchedResources : Maybe Json.Encode.Value
+        | fetchedResources : Maybe (List Concourse.Resource)
         , pipelineLocator : Concourse.PipelineIdentifier
         , pinMenuExpanded : Bool
     }
@@ -67,7 +66,7 @@ type alias Badge =
 
 type alias Text =
     { content : String
-    , fontWeight : Int
+    , fontWeight : String
     , color : String
     }
 
@@ -150,7 +149,7 @@ pinMenu { hovered } model =
                         (\( resourceName, pinnedVersion ) ->
                             { title =
                                 { content = resourceName
-                                , fontWeight = 700
+                                , fontWeight = Views.Styles.fontWeightDefault
                                 , color = Colors.text
                                 }
                             , table =
@@ -204,16 +203,18 @@ viewPinMenu session m =
         |> viewView
 
 
-getPinnedResources : Maybe Json.Encode.Value -> List ( String, Concourse.Version )
+getPinnedResources : Maybe (List Concourse.Resource) -> List ( String, Concourse.Version )
 getPinnedResources fetchedResources =
     case fetchedResources of
         Nothing ->
             []
 
-        Just res ->
-            Json.Decode.decodeValue (Json.Decode.list Concourse.decodeResource) res
-                |> Result.withDefault []
-                |> List.filterMap (\r -> Maybe.map (\v -> ( r.name, v )) r.pinnedVersion)
+        Just resources ->
+            resources
+                |> List.filterMap
+                    (\r ->
+                        Maybe.map (\v -> ( r.name, v )) r.pinnedVersion
+                    )
 
 
 viewView : View -> Html Message

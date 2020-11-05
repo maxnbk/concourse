@@ -11,9 +11,12 @@ import (
 	"github.com/concourse/concourse/atc"
 	"github.com/concourse/concourse/atc/db"
 	"github.com/concourse/concourse/atc/worker"
+	"github.com/concourse/concourse/tracing"
 )
 
 const RawRootFSScheme = "raw"
+
+const ImageMetadataFile = "metadata.json"
 
 type imageProvidedByPreviousStepOnSameWorker struct {
 	artifactVolume worker.Volume
@@ -43,7 +46,7 @@ func (i *imageProvidedByPreviousStepOnSameWorker) FetchForContainer(
 		return worker.FetchedImage{}, err
 	}
 
-	imageMetadataReader, err := i.imageSpec.ImageArtifactSource.StreamFile(ctx, logger, ImageMetadataFile)
+	imageMetadataReader, err := i.imageSpec.ImageArtifactSource.StreamFile(ctx, ImageMetadataFile)
 	if err != nil {
 		logger.Error("failed-to-stream-metadata-file", err)
 		return worker.FetchedImage{}, err
@@ -77,6 +80,9 @@ func (i *imageProvidedByPreviousStepOnDifferentWorker) FetchForContainer(
 	logger lager.Logger,
 	container db.CreatingContainer,
 ) (worker.FetchedImage, error) {
+	ctx, span := tracing.StartSpan(ctx, "imageProvidedByPreviousStepOnDifferentWorker.FetchForContainer", tracing.Attrs{"container_id": container.Handle()})
+	defer span.End()
+
 	imageVolume, err := i.volumeClient.FindOrCreateVolumeForContainer(
 		logger,
 		worker.VolumeSpec{
@@ -96,14 +102,14 @@ func (i *imageProvidedByPreviousStepOnDifferentWorker) FetchForContainer(
 		destination: imageVolume,
 	}
 
-	err = i.imageSpec.ImageArtifactSource.StreamTo(ctx, logger, &dest)
+	err = i.imageSpec.ImageArtifactSource.StreamTo(ctx, &dest)
 	if err != nil {
 		logger.Error("failed-to-stream-image-artifact-source", err)
 		return worker.FetchedImage{}, err
 	}
 	logger.Debug("streamed-non-local-image-volume")
 
-	imageMetadataReader, err := i.imageSpec.ImageArtifactSource.StreamFile(ctx, logger, ImageMetadataFile)
+	imageMetadataReader, err := i.imageSpec.ImageArtifactSource.StreamFile(ctx, ImageMetadataFile)
 	if err != nil {
 		logger.Error("failed-to-stream-metadata-file", err)
 		return worker.FetchedImage{}, err
@@ -123,64 +129,6 @@ func (i *imageProvidedByPreviousStepOnDifferentWorker) FetchForContainer(
 		Metadata:   metadata,
 		URL:        imageURL.String(),
 		Privileged: i.imageSpec.Privileged,
-	}, nil
-}
-
-type imageFromResource struct {
-	privileged   bool
-	teamID       int
-	volumeClient worker.VolumeClient
-
-	imageResourceFetcher ImageResourceFetcher
-}
-
-func (i *imageFromResource) FetchForContainer(
-	ctx context.Context,
-	logger lager.Logger,
-	container db.CreatingContainer,
-) (worker.FetchedImage, error) {
-	imageParentVolume, imageMetadataReader, version, err := i.imageResourceFetcher.Fetch(
-		ctx,
-		logger.Session("image"),
-		container,
-		i.privileged,
-	)
-	if err != nil {
-		logger.Error("failed-to-fetch-image", err)
-		return worker.FetchedImage{}, err
-	}
-
-	imageVolume, err := i.volumeClient.FindOrCreateCOWVolumeForContainer(
-		logger.Session("create-cow-volume"),
-		worker.VolumeSpec{
-			Strategy:   imageParentVolume.COWStrategy(),
-			Privileged: i.privileged,
-		},
-		container,
-		imageParentVolume,
-		i.teamID,
-		"/",
-	)
-	if err != nil {
-		logger.Error("failed-to-create-image-resource-volume", err)
-		return worker.FetchedImage{}, err
-	}
-
-	metadata, err := loadMetadata(imageMetadataReader)
-	if err != nil {
-		return worker.FetchedImage{}, err
-	}
-
-	imageURL := url.URL{
-		Scheme: RawRootFSScheme,
-		Path:   path.Join(imageVolume.Path(), "rootfs"),
-	}
-
-	return worker.FetchedImage{
-		Metadata:   metadata,
-		Version:    version,
-		URL:        imageURL.String(),
-		Privileged: i.privileged,
 	}, nil
 }
 

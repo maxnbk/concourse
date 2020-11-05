@@ -96,21 +96,6 @@ type FakeClient struct {
 		result2 concourse.Pagination
 		result3 error
 	}
-	CheckStub        func(string) (atc.Check, bool, error)
-	checkMutex       sync.RWMutex
-	checkArgsForCall []struct {
-		arg1 string
-	}
-	checkReturns struct {
-		result1 atc.Check
-		result2 bool
-		result3 error
-	}
-	checkReturnsOnCall map[int]struct {
-		result1 atc.Check
-		result2 bool
-		result3 error
-	}
 	FindTeamStub        func(string) (concourse.Team, error)
 	findTeamMutex       sync.RWMutex
 	findTeamArgsForCall []struct {
@@ -184,6 +169,18 @@ type FakeClient struct {
 	}
 	listActiveUsersSinceReturnsOnCall map[int]struct {
 		result1 []atc.User
+		result2 error
+	}
+	ListAllJobsStub        func() ([]atc.Job, error)
+	listAllJobsMutex       sync.RWMutex
+	listAllJobsArgsForCall []struct {
+	}
+	listAllJobsReturns struct {
+		result1 []atc.Job
+		result2 error
+	}
+	listAllJobsReturnsOnCall map[int]struct {
+		result1 []atc.Job
 		result2 error
 	}
 	ListBuildArtifactsStub        func(string) ([]atc.WorkerArtifact, error)
@@ -281,16 +278,16 @@ type FakeClient struct {
 	uRLReturnsOnCall map[int]struct {
 		result1 string
 	}
-	UserInfoStub        func() (map[string]interface{}, error)
+	UserInfoStub        func() (atc.UserInfo, error)
 	userInfoMutex       sync.RWMutex
 	userInfoArgsForCall []struct {
 	}
 	userInfoReturns struct {
-		result1 map[string]interface{}
+		result1 atc.UserInfo
 		result2 error
 	}
 	userInfoReturnsOnCall map[int]struct {
-		result1 map[string]interface{}
+		result1 atc.UserInfo
 		result2 error
 	}
 	invocations      map[string][][]interface{}
@@ -684,72 +681,6 @@ func (fake *FakeClient) BuildsReturnsOnCall(i int, result1 []atc.Build, result2 
 	}{result1, result2, result3}
 }
 
-func (fake *FakeClient) Check(arg1 string) (atc.Check, bool, error) {
-	fake.checkMutex.Lock()
-	ret, specificReturn := fake.checkReturnsOnCall[len(fake.checkArgsForCall)]
-	fake.checkArgsForCall = append(fake.checkArgsForCall, struct {
-		arg1 string
-	}{arg1})
-	fake.recordInvocation("Check", []interface{}{arg1})
-	fake.checkMutex.Unlock()
-	if fake.CheckStub != nil {
-		return fake.CheckStub(arg1)
-	}
-	if specificReturn {
-		return ret.result1, ret.result2, ret.result3
-	}
-	fakeReturns := fake.checkReturns
-	return fakeReturns.result1, fakeReturns.result2, fakeReturns.result3
-}
-
-func (fake *FakeClient) CheckCallCount() int {
-	fake.checkMutex.RLock()
-	defer fake.checkMutex.RUnlock()
-	return len(fake.checkArgsForCall)
-}
-
-func (fake *FakeClient) CheckCalls(stub func(string) (atc.Check, bool, error)) {
-	fake.checkMutex.Lock()
-	defer fake.checkMutex.Unlock()
-	fake.CheckStub = stub
-}
-
-func (fake *FakeClient) CheckArgsForCall(i int) string {
-	fake.checkMutex.RLock()
-	defer fake.checkMutex.RUnlock()
-	argsForCall := fake.checkArgsForCall[i]
-	return argsForCall.arg1
-}
-
-func (fake *FakeClient) CheckReturns(result1 atc.Check, result2 bool, result3 error) {
-	fake.checkMutex.Lock()
-	defer fake.checkMutex.Unlock()
-	fake.CheckStub = nil
-	fake.checkReturns = struct {
-		result1 atc.Check
-		result2 bool
-		result3 error
-	}{result1, result2, result3}
-}
-
-func (fake *FakeClient) CheckReturnsOnCall(i int, result1 atc.Check, result2 bool, result3 error) {
-	fake.checkMutex.Lock()
-	defer fake.checkMutex.Unlock()
-	fake.CheckStub = nil
-	if fake.checkReturnsOnCall == nil {
-		fake.checkReturnsOnCall = make(map[int]struct {
-			result1 atc.Check
-			result2 bool
-			result3 error
-		})
-	}
-	fake.checkReturnsOnCall[i] = struct {
-		result1 atc.Check
-		result2 bool
-		result3 error
-	}{result1, result2, result3}
-}
-
 func (fake *FakeClient) FindTeam(arg1 string) (concourse.Team, error) {
 	fake.findTeamMutex.Lock()
 	ret, specificReturn := fake.findTeamReturnsOnCall[len(fake.findTeamArgsForCall)]
@@ -1106,6 +1037,61 @@ func (fake *FakeClient) ListActiveUsersSinceReturnsOnCall(i int, result1 []atc.U
 	}
 	fake.listActiveUsersSinceReturnsOnCall[i] = struct {
 		result1 []atc.User
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeClient) ListAllJobs() ([]atc.Job, error) {
+	fake.listAllJobsMutex.Lock()
+	ret, specificReturn := fake.listAllJobsReturnsOnCall[len(fake.listAllJobsArgsForCall)]
+	fake.listAllJobsArgsForCall = append(fake.listAllJobsArgsForCall, struct {
+	}{})
+	fake.recordInvocation("ListAllJobs", []interface{}{})
+	fake.listAllJobsMutex.Unlock()
+	if fake.ListAllJobsStub != nil {
+		return fake.ListAllJobsStub()
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	fakeReturns := fake.listAllJobsReturns
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *FakeClient) ListAllJobsCallCount() int {
+	fake.listAllJobsMutex.RLock()
+	defer fake.listAllJobsMutex.RUnlock()
+	return len(fake.listAllJobsArgsForCall)
+}
+
+func (fake *FakeClient) ListAllJobsCalls(stub func() ([]atc.Job, error)) {
+	fake.listAllJobsMutex.Lock()
+	defer fake.listAllJobsMutex.Unlock()
+	fake.ListAllJobsStub = stub
+}
+
+func (fake *FakeClient) ListAllJobsReturns(result1 []atc.Job, result2 error) {
+	fake.listAllJobsMutex.Lock()
+	defer fake.listAllJobsMutex.Unlock()
+	fake.ListAllJobsStub = nil
+	fake.listAllJobsReturns = struct {
+		result1 []atc.Job
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeClient) ListAllJobsReturnsOnCall(i int, result1 []atc.Job, result2 error) {
+	fake.listAllJobsMutex.Lock()
+	defer fake.listAllJobsMutex.Unlock()
+	fake.ListAllJobsStub = nil
+	if fake.listAllJobsReturnsOnCall == nil {
+		fake.listAllJobsReturnsOnCall = make(map[int]struct {
+			result1 []atc.Job
+			result2 error
+		})
+	}
+	fake.listAllJobsReturnsOnCall[i] = struct {
+		result1 []atc.Job
 		result2 error
 	}{result1, result2}
 }
@@ -1574,7 +1560,7 @@ func (fake *FakeClient) URLReturnsOnCall(i int, result1 string) {
 	}{result1}
 }
 
-func (fake *FakeClient) UserInfo() (map[string]interface{}, error) {
+func (fake *FakeClient) UserInfo() (atc.UserInfo, error) {
 	fake.userInfoMutex.Lock()
 	ret, specificReturn := fake.userInfoReturnsOnCall[len(fake.userInfoArgsForCall)]
 	fake.userInfoArgsForCall = append(fake.userInfoArgsForCall, struct {
@@ -1597,34 +1583,34 @@ func (fake *FakeClient) UserInfoCallCount() int {
 	return len(fake.userInfoArgsForCall)
 }
 
-func (fake *FakeClient) UserInfoCalls(stub func() (map[string]interface{}, error)) {
+func (fake *FakeClient) UserInfoCalls(stub func() (atc.UserInfo, error)) {
 	fake.userInfoMutex.Lock()
 	defer fake.userInfoMutex.Unlock()
 	fake.UserInfoStub = stub
 }
 
-func (fake *FakeClient) UserInfoReturns(result1 map[string]interface{}, result2 error) {
+func (fake *FakeClient) UserInfoReturns(result1 atc.UserInfo, result2 error) {
 	fake.userInfoMutex.Lock()
 	defer fake.userInfoMutex.Unlock()
 	fake.UserInfoStub = nil
 	fake.userInfoReturns = struct {
-		result1 map[string]interface{}
+		result1 atc.UserInfo
 		result2 error
 	}{result1, result2}
 }
 
-func (fake *FakeClient) UserInfoReturnsOnCall(i int, result1 map[string]interface{}, result2 error) {
+func (fake *FakeClient) UserInfoReturnsOnCall(i int, result1 atc.UserInfo, result2 error) {
 	fake.userInfoMutex.Lock()
 	defer fake.userInfoMutex.Unlock()
 	fake.UserInfoStub = nil
 	if fake.userInfoReturnsOnCall == nil {
 		fake.userInfoReturnsOnCall = make(map[int]struct {
-			result1 map[string]interface{}
+			result1 atc.UserInfo
 			result2 error
 		})
 	}
 	fake.userInfoReturnsOnCall[i] = struct {
-		result1 map[string]interface{}
+		result1 atc.UserInfo
 		result2 error
 	}{result1, result2}
 }
@@ -1644,8 +1630,6 @@ func (fake *FakeClient) Invocations() map[string][][]interface{} {
 	defer fake.buildResourcesMutex.RUnlock()
 	fake.buildsMutex.RLock()
 	defer fake.buildsMutex.RUnlock()
-	fake.checkMutex.RLock()
-	defer fake.checkMutex.RUnlock()
 	fake.findTeamMutex.RLock()
 	defer fake.findTeamMutex.RUnlock()
 	fake.getCLIReaderMutex.RLock()
@@ -1658,6 +1642,8 @@ func (fake *FakeClient) Invocations() map[string][][]interface{} {
 	defer fake.landWorkerMutex.RUnlock()
 	fake.listActiveUsersSinceMutex.RLock()
 	defer fake.listActiveUsersSinceMutex.RUnlock()
+	fake.listAllJobsMutex.RLock()
+	defer fake.listAllJobsMutex.RUnlock()
 	fake.listBuildArtifactsMutex.RLock()
 	defer fake.listBuildArtifactsMutex.RUnlock()
 	fake.listPipelinesMutex.RLock()

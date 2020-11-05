@@ -51,7 +51,7 @@ type (
 )
 
 func init() {
-	metric.RegisterEmitter(&NewRelicConfig{})
+	metric.Metrics.RegisterEmitter(&NewRelicConfig{})
 }
 
 func (config *NewRelicConfig) Description() string { return "NewRelic" }
@@ -61,7 +61,7 @@ func (config *NewRelicConfig) IsConfigured() bool {
 
 func (config *NewRelicConfig) NewEmitter() (metric.Emitter, error) {
 	client := &http.Client{
-		Transport: &http.Transport{},
+		Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
 		Timeout:   time.Minute,
 	}
 
@@ -72,6 +72,7 @@ func (config *NewRelicConfig) NewEmitter() (metric.Emitter, error) {
 		prefix:             config.ServicePrefix,
 		containers:         new(stats),
 		volumes:            new(stats),
+		checks:             new(stats),
 		BatchSize:          int(config.BatchSize),
 		BatchDuration:      config.BatchDuration,
 		DisableCompression: config.DisableCompression,
@@ -100,7 +101,8 @@ func (emitter *NewRelicEmitter) Emit(logger lager.Logger, event metric.Event) {
 		"database queries",
 		"database connections",
 		"worker unknown containers",
-		"worker unknown volumes":
+		"worker unknown volumes",
+		"volumes streamed":
 		emitter.NewRelicBatch = append(emitter.NewRelicBatch, emitter.transformToNewRelicEvent(event, ""))
 
 	// These are periodic metrics that are consolidated and only emitted once

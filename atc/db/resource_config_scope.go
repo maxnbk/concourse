@@ -24,23 +24,18 @@ type ResourceConfigScope interface {
 	ID() int
 	Resource() Resource
 	ResourceConfig() ResourceConfig
-	CheckError() error
 
-	SaveVersions(versions []atc.Version) error
+	SaveVersions(SpanContext, []atc.Version) error
 	FindVersion(atc.Version) (ResourceConfigVersion, bool, error)
 	LatestVersion() (ResourceConfigVersion, bool, error)
-
-	SetCheckError(error) error
 
 	AcquireResourceCheckingLock(
 		logger lager.Logger,
 	) (lock.Lock, bool, error)
 
-	UpdateLastCheckStartTime(
-		interval time.Duration,
-		immediate bool,
-	) (bool, error)
+	UpdateLastCheckStartTime() (bool, error)
 
+	LastCheckEndTime() (time.Time, error)
 	UpdateLastCheckEndTime() (bool, error)
 }
 
@@ -48,7 +43,6 @@ type resourceConfigScope struct {
 	id             int
 	resource       Resource
 	resourceConfig ResourceConfig
-	checkError     error
 
 	conn        Conn
 	lockFactory lock.LockFactory
@@ -57,7 +51,21 @@ type resourceConfigScope struct {
 func (r *resourceConfigScope) ID() int                        { return r.id }
 func (r *resourceConfigScope) Resource() Resource             { return r.resource }
 func (r *resourceConfigScope) ResourceConfig() ResourceConfig { return r.resourceConfig }
-func (r *resourceConfigScope) CheckError() error              { return r.checkError }
+
+func (r *resourceConfigScope) LastCheckEndTime() (time.Time, error) {
+	var lastCheckEndTime time.Time
+	err := psql.Select("last_check_end_time").
+		From("resource_config_scopes").
+		Where(sq.Eq{"id": r.id}).
+		RunWith(r.conn).
+		QueryRow().
+		Scan(&lastCheckEndTime)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return lastCheckEndTime, nil
+}
 
 // SaveVersions stores a list of version in the db for a resource config
 // Each version will also have its check order field updated and the
@@ -66,11 +74,11 @@ func (r *resourceConfigScope) CheckError() error              { return r.checkEr
 // In the case of a check resource from an older version, the versions
 // that already exist in the DB will be re-ordered using
 // incrementCheckOrder to input the correct check order
-func (r *resourceConfigScope) SaveVersions(versions []atc.Version) error {
-	return saveVersions(r.conn, r.ID(), versions)
+func (r *resourceConfigScope) SaveVersions(spanContext SpanContext, versions []atc.Version) error {
+	return saveVersions(r.conn, r.ID(), versions, spanContext)
 }
 
-func saveVersions(conn Conn, rcsID int, versions []atc.Version) error {
+func saveVersions(conn Conn, rcsID int, versions []atc.Version, spanContext SpanContext) error {
 	tx, err := conn.Begin()
 	if err != nil {
 		return err
@@ -80,7 +88,7 @@ func saveVersions(conn Conn, rcsID int, versions []atc.Version) error {
 
 	var containsNewVersion bool
 	for _, version := range versions {
-		newVersion, err := saveResourceVersion(tx, rcsID, version, nil)
+		newVersion, err := saveResourceVersion(tx, rcsID, version, nil, spanContext)
 		if err != nil {
 			return err
 		}
@@ -119,8 +127,7 @@ func saveVersions(conn Conn, rcsID int, versions []atc.Version) error {
 
 func (r *resourceConfigScope) FindVersion(v atc.Version) (ResourceConfigVersion, bool, error) {
 	rcv := &resourceConfigVersion{
-		resourceConfigScope: r,
-		conn:                r.conn,
+		conn: r.conn,
 	}
 
 	versionByte, err := json.Marshal(v)
@@ -149,8 +156,7 @@ func (r *resourceConfigScope) FindVersion(v atc.Version) (ResourceConfigVersion,
 
 func (r *resourceConfigScope) LatestVersion() (ResourceConfigVersion, bool, error) {
 	rcv := &resourceConfigVersion{
-		conn:                r.conn,
-		resourceConfigScope: r,
+		conn: r.conn,
 	}
 
 	row := resourceConfigVersionQuery.
@@ -171,26 +177,6 @@ func (r *resourceConfigScope) LatestVersion() (ResourceConfigVersion, bool, erro
 	return rcv, true, nil
 }
 
-func (r *resourceConfigScope) SetCheckError(cause error) error {
-	var err error
-
-	if cause == nil {
-		_, err = psql.Update("resource_config_scopes").
-			Set("check_error", nil).
-			Where(sq.Eq{"id": r.id}).
-			RunWith(r.conn).
-			Exec()
-	} else {
-		_, err = psql.Update("resource_config_scopes").
-			Set("check_error", cause.Error()).
-			Where(sq.Eq{"id": r.id}).
-			RunWith(r.conn).
-			Exec()
-	}
-
-	return err
-}
-
 func (r *resourceConfigScope) AcquireResourceCheckingLock(
 	logger lager.Logger,
 ) (lock.Lock, bool, error) {
@@ -200,10 +186,7 @@ func (r *resourceConfigScope) AcquireResourceCheckingLock(
 	)
 }
 
-func (r *resourceConfigScope) UpdateLastCheckStartTime(
-	interval time.Duration,
-	immediate bool,
-) (bool, error) {
+func (r *resourceConfigScope) UpdateLastCheckStartTime() (bool, error) {
 	tx, err := r.conn.Begin()
 	if err != nil {
 		return false, err
@@ -211,19 +194,11 @@ func (r *resourceConfigScope) UpdateLastCheckStartTime(
 
 	defer Rollback(tx)
 
-	params := []interface{}{r.id}
-
-	condition := ""
-	if !immediate {
-		condition = "AND now() - last_check_start_time > ($2 || ' SECONDS')::INTERVAL"
-		params = append(params, interval.Seconds())
-	}
-
 	updated, err := checkIfRowsUpdated(tx, `
-			UPDATE resource_config_scopes
-			SET last_check_start_time = now()
-			WHERE id = $1
-		`+condition, params...)
+		UPDATE resource_config_scopes
+		SET last_check_start_time = now()
+		WHERE id = $1
+	`, r.id)
 	if err != nil {
 		return false, err
 	}
@@ -249,10 +224,10 @@ func (r *resourceConfigScope) UpdateLastCheckEndTime() (bool, error) {
 	defer Rollback(tx)
 
 	updated, err := checkIfRowsUpdated(tx, `
-			UPDATE resource_config_scopes
-			SET last_check_end_time = now()
-			WHERE id = $1
-		`, r.id)
+		UPDATE resource_config_scopes
+		SET last_check_end_time = now()
+		WHERE id = $1
+	`, r.id)
 	if err != nil {
 		return false, err
 	}
@@ -269,7 +244,7 @@ func (r *resourceConfigScope) UpdateLastCheckEndTime() (bool, error) {
 	return true, nil
 }
 
-func saveResourceVersion(tx Tx, rcsID int, version atc.Version, metadata ResourceConfigMetadataFields) (bool, error) {
+func saveResourceVersion(tx Tx, rcsID int, version atc.Version, metadata ResourceConfigMetadataFields, spanContext SpanContext) (bool, error) {
 	versionJSON, err := json.Marshal(version)
 	if err != nil {
 		return false, err
@@ -280,14 +255,19 @@ func saveResourceVersion(tx Tx, rcsID int, version atc.Version, metadata Resourc
 		return false, err
 	}
 
+	spanContextJSON, err := json.Marshal(spanContext)
+	if err != nil {
+		return false, err
+	}
+
 	var checkOrder int
 	err = tx.QueryRow(`
-		INSERT INTO resource_config_versions (resource_config_scope_id, version, version_md5, metadata)
-		SELECT $1, $2, md5($3), $4
+		INSERT INTO resource_config_versions (resource_config_scope_id, version, version_md5, metadata, span_context)
+		SELECT $1, $2, md5($3), $4, $5
 		ON CONFLICT (resource_config_scope_id, version_md5)
 		DO UPDATE SET metadata = COALESCE(NULLIF(excluded.metadata, 'null'::jsonb), resource_config_versions.metadata)
 		RETURNING check_order
-		`, rcsID, string(versionJSON), string(versionJSON), string(metadataJSON)).Scan(&checkOrder)
+		`, rcsID, string(versionJSON), string(versionJSON), string(metadataJSON), string(spanContextJSON)).Scan(&checkOrder)
 	if err != nil {
 		return false, err
 	}

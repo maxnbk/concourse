@@ -16,14 +16,16 @@ import (
 	"code.cloudfoundry.org/garden"
 	"code.cloudfoundry.org/lager"
 	"github.com/concourse/baggageclaim"
+	"github.com/cppforlife/go-semi-semantic/version"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/concourse/concourse/atc"
 	"github.com/concourse/concourse/atc/db"
 	"github.com/concourse/concourse/atc/metric"
 	"github.com/concourse/concourse/atc/resource"
 	"github.com/concourse/concourse/atc/runtime"
 	"github.com/concourse/concourse/atc/worker/gclient"
-	"github.com/cppforlife/go-semi-semantic/version"
-	"golang.org/x/sync/errgroup"
+	"github.com/concourse/concourse/tracing"
 )
 
 const userPropertyName = "user"
@@ -49,11 +51,9 @@ type Worker interface {
 	FindOrCreateContainer(
 		context.Context,
 		lager.Logger,
-		ImageFetchingDelegate,
 		db.ContainerOwner,
 		db.ContainerMetadata,
 		ContainerSpec,
-		atc.VersionedResourceTypes,
 	) (Container, error)
 
 	FindVolumeForResourceCache(logger lager.Logger, resourceCache db.UsedResourceCache) (Volume, bool, error)
@@ -68,7 +68,6 @@ type Worker interface {
 		runtime.ProcessSpec,
 		resource.Resource,
 		db.ContainerOwner,
-		ImageFetcherSpec,
 		db.UsedResourceCache,
 		string,
 	) (GetResult, Volume, error)
@@ -209,11 +208,23 @@ func (worker *gardenWorker) LookupVolume(logger lager.Logger, handle string) (Vo
 func (worker *gardenWorker) FindOrCreateContainer(
 	ctx context.Context,
 	logger lager.Logger,
-	delegate ImageFetchingDelegate,
 	owner db.ContainerOwner,
 	metadata db.ContainerMetadata,
 	containerSpec ContainerSpec,
-	resourceTypes atc.VersionedResourceTypes,
+) (Container, error) {
+	c, err := worker.findOrCreateContainer(ctx, logger, owner, metadata, containerSpec)
+	if err != nil {
+		return c, fmt.Errorf("find or create container on worker %s: %w", worker.Name(), err)
+	}
+	return c, err
+}
+
+func (worker *gardenWorker) findOrCreateContainer(
+	ctx context.Context,
+	logger lager.Logger,
+	owner db.ContainerOwner,
+	metadata db.ContainerMetadata,
+	containerSpec ContainerSpec,
 ) (Container, error) {
 
 	var (
@@ -246,7 +257,7 @@ func (worker *gardenWorker) FindOrCreateContainer(
 				return nil, ResourceConfigCheckSessionExpiredError
 			}
 
-			return nil, err
+			return nil, fmt.Errorf("create container: %w", err)
 		}
 		logger.Debug("created-creating-container-in-db")
 		containerHandle = creatingContainer.Handle()
@@ -286,8 +297,6 @@ func (worker *gardenWorker) FindOrCreateContainer(
 			logger,
 			containerSpec.ImageSpec,
 			containerSpec.TeamID,
-			delegate,
-			resourceTypes,
 			creatingContainer,
 		)
 		if err != nil {
@@ -317,7 +326,7 @@ func (worker *gardenWorker) FindOrCreateContainer(
 			if failedErr != nil {
 				logger.Error("failed-to-mark-container-as-failed", err)
 			}
-			metric.FailedContainers.Inc()
+			metric.Metrics.FailedContainers.Inc()
 
 			logger.Error("failed-to-create-container-in-garden", err)
 			return nil, err
@@ -327,7 +336,7 @@ func (worker *gardenWorker) FindOrCreateContainer(
 
 	logger.Debug("created-container-in-garden")
 
-	metric.ContainersCreated.Inc()
+	metric.Metrics.ContainersCreated.Inc()
 	createdContainer, err = creatingContainer.Created()
 	if err != nil {
 		logger.Error("failed-to-mark-container-as-created", err)
@@ -374,8 +383,6 @@ func (worker *gardenWorker) fetchImageForContainer(
 	logger lager.Logger,
 	spec ImageSpec,
 	teamID int,
-	delegate ImageFetchingDelegate,
-	resourceTypes atc.VersionedResourceTypes,
 	creatingContainer db.CreatingContainer,
 ) (FetchedImage, error) {
 	image, err := worker.imageFactory.GetImage(
@@ -384,8 +391,6 @@ func (worker *gardenWorker) fetchImageForContainer(
 		worker.volumeClient,
 		spec,
 		teamID,
-		delegate,
-		resourceTypes,
 	)
 	if err != nil {
 		return FetchedImage{}, err
@@ -595,7 +600,15 @@ func (worker *gardenWorker) cloneRemoteVolumes(
 	container db.CreatingContainer,
 	nonLocals []mountableRemoteInput,
 ) ([]VolumeMount, error) {
+
 	mounts := make([]VolumeMount, len(nonLocals))
+	if len(nonLocals) <= 0 {
+		return mounts, nil
+	}
+
+	ctx, span := tracing.StartSpan(ctx, "worker.cloneRemoteVolumes", tracing.Attrs{"container_id": container.Handle()})
+	defer span.End()
+
 	g, groupCtx := errgroup.WithContext(ctx)
 
 	for i, nonLocalInput := range nonLocals {
@@ -614,14 +627,10 @@ func (worker *gardenWorker) cloneRemoteVolumes(
 		if err != nil {
 			return []VolumeMount{}, err
 		}
-		destData := lager.Data{
-			"dest-volume": inputVolume.Handle(),
-			"dest-worker": inputVolume.WorkerName(),
-		}
 
 		g.Go(func() error {
 			if streamable, ok := nonLocalInput.desiredArtifact.(StreamableArtifactSource); ok {
-				err = streamable.StreamTo(groupCtx, logger.Session("stream-to", destData), inputVolume)
+				err = streamable.StreamTo(groupCtx, inputVolume)
 				if err != nil {
 					return err
 				}
@@ -639,9 +648,7 @@ func (worker *gardenWorker) cloneRemoteVolumes(
 		return nil, err
 	}
 
-	if len(nonLocals) > 0 {
-		logger.Debug("streamed-non-local-volumes", lager.Data{"volumes-streamed": len(nonLocals)})
-	}
+	logger.Debug("streamed-non-local-volumes", lager.Data{"volumes-streamed": len(nonLocals)})
 
 	return mounts, nil
 }
@@ -705,11 +712,9 @@ func (worker *gardenWorker) Satisfies(logger lager.Logger, spec WorkerSpec) bool
 	}
 
 	if spec.ResourceType != "" {
-		underlyingType := determineUnderlyingTypeName(spec.ResourceType, spec.ResourceTypes)
-
 		matchedType := false
 		for _, t := range workerResourceTypes {
-			if t.Type == underlyingType {
+			if t.Type == spec.ResourceType {
 				matchedType = true
 				break
 			}
@@ -731,21 +736,6 @@ func (worker *gardenWorker) Satisfies(logger lager.Logger, spec WorkerSpec) bool
 	}
 
 	return true
-}
-
-func determineUnderlyingTypeName(typeName string, resourceTypes atc.VersionedResourceTypes) string {
-	resourceTypesMap := make(map[string]atc.VersionedResourceType)
-	for _, resourceType := range resourceTypes {
-		resourceTypesMap[resourceType.Name] = resourceType
-	}
-	underlyingTypeName := typeName
-	underlyingType, ok := resourceTypesMap[underlyingTypeName]
-	for ok {
-		underlyingTypeName = underlyingType.Type
-		underlyingType, ok = resourceTypesMap[underlyingTypeName]
-		delete(resourceTypesMap, underlyingTypeName)
-	}
-	return underlyingTypeName
 }
 
 func (worker *gardenWorker) Description() string {

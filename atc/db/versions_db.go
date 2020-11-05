@@ -13,8 +13,8 @@ import (
 	"github.com/concourse/concourse/atc"
 	"github.com/concourse/concourse/tracing"
 	gocache "github.com/patrickmn/go-cache"
-	"go.opentelemetry.io/otel/api/key"
 	"go.opentelemetry.io/otel/api/trace"
+	"go.opentelemetry.io/otel/label"
 )
 
 type VersionsDB struct {
@@ -212,6 +212,24 @@ func (versions VersionsDB) SuccessfulBuildOutputs(ctx context.Context, buildID i
 	return algorithmOutputs, nil
 }
 
+func (versions VersionsDB) VersionExists(ctx context.Context, resourceID int, versionMD5 ResourceVersion) (bool, error) {
+	var exists bool
+	err := versions.conn.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM resource_config_versions v
+			JOIN resources r ON r.resource_config_scope_id = v.resource_config_scope_id
+			WHERE r.id = $1
+			AND v.version_md5 = $2
+		)`, resourceID, versionMD5).
+		Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
 func (versions VersionsDB) FindVersionOfResource(ctx context.Context, resourceID int, v atc.Version) (ResourceVersion, bool, error) {
 	versionJSON, err := json.Marshal(v)
 	if err != nil {
@@ -232,7 +250,7 @@ func (versions VersionsDB) FindVersionOfResource(ctx context.Context, resourceID
 		Where(sq.Eq{
 			"r.id": resourceID,
 		}).
-		Where(sq.Expr("rcv.version_md5 = md5(?)", versionJSON)).
+		Where(sq.Expr("rcv.version @> ?", versionJSON)).
 		RunWith(versions.conn).
 		QueryRowContext(ctx).
 		Scan(&version)
@@ -565,7 +583,7 @@ func (versions VersionsDB) migrateSingle(ctx context.Context, buildID int) (stri
 	ctx, span := tracing.StartSpan(ctx, "VersionsDB.migrateSingle", tracing.Attrs{})
 	defer span.End()
 
-	span.SetAttributes(key.New("buildID").Int(buildID))
+	span.SetAttributes(label.Int("buildID", buildID))
 
 	var outputs string
 	err := versions.conn.QueryRowContext(ctx, `
@@ -727,7 +745,7 @@ func (bs *PaginatedBuilds) migrateLimit(ctx context.Context) (bool, error) {
 	ctx, span := tracing.StartSpan(ctx, "PaginatedBuilds.migrateLimit", tracing.Attrs{})
 	defer span.End()
 
-	span.SetAttributes(key.New("jobID").Int(bs.jobID))
+	span.SetAttributes(label.Int("jobID", bs.jobID))
 
 	buildsToMigrateQueryBuilder := psql.Select("id", "job_id", "rerun_of").
 		From("builds").
@@ -786,7 +804,7 @@ func (bs *PaginatedBuilds) migrateLimit(ctx context.Context) (bool, error) {
 	trace.SpanFromContext(ctx).AddEvent(
 		ctx,
 		"builds migrated",
-		key.New("rows").Int64(rowsAffected),
+		label.Int64("rows", rowsAffected),
 	)
 
 	if rowsAffected == 0 {

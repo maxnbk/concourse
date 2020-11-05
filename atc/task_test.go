@@ -209,7 +209,7 @@ run: {path: a/file}
 			})
 
 			It("returns an error", func() {
-				Expect(invalidConfig.Validate()).To(MatchError(ContainSubstring("  missing 'platform'")))
+				Expect(invalidConfig.Validate()).To(MatchError(ContainSubstring("missing 'platform'")))
 			})
 		})
 
@@ -224,9 +224,9 @@ run: {path: a/file}
 `)
 					task, err := NewTaskConfig(data)
 					Expect(err).ToNot(HaveOccurred())
-					cpu := uint64(1024)
-					memory := uint64(1024)
-					Expect(task.Limits).To(Equal(ContainerLimits{
+					cpu := CPULimit(1024)
+					memory := MemoryLimit(1024)
+					Expect(task.Limits).To(Equal(&ContainerLimits{
 						CPU:    &cpu,
 						Memory: &memory,
 					}))
@@ -241,9 +241,9 @@ run: {path: a/file}
 `)
 					task, err := NewTaskConfig(data)
 					Expect(err).ToNot(HaveOccurred())
-					cpu := uint64(1024)
-					memory := uint64(209715200)
-					Expect(task.Limits).To(Equal(ContainerLimits{
+					cpu := CPULimit(1024)
+					memory := MemoryLimit(209715200)
+					Expect(task.Limits).To(Equal(&ContainerLimits{
 						CPU:    &cpu,
 						Memory: &memory,
 					}))
@@ -260,8 +260,8 @@ run: {path: a/file}
 `)
 					task, err := NewTaskConfig(data)
 					Expect(err).ToNot(HaveOccurred())
-					memory := uint64(1024)
-					Expect(task.Limits).To(Equal(ContainerLimits{
+					memory := MemoryLimit(1024)
+					Expect(task.Limits).To(Equal(&ContainerLimits{
 						Memory: &memory,
 					}))
 				})
@@ -275,8 +275,8 @@ run: {path: a/file}
 `)
 					task, err := NewTaskConfig(data)
 					Expect(err).ToNot(HaveOccurred())
-					cpu := uint64(355)
-					Expect(task.Limits).To(Equal(ContainerLimits{
+					cpu := CPULimit(355)
+					Expect(task.Limits).To(Equal(&ContainerLimits{
 						CPU: &cpu,
 					}))
 				})
@@ -325,7 +325,7 @@ run: {path: a/file}
 				})
 
 				It("returns an error", func() {
-					Expect(invalidConfig.Validate()).To(MatchError(ContainSubstring("  input in position 1 is missing a name")))
+					Expect(invalidConfig.Validate()).To(MatchError(ContainSubstring("input in position 1 is missing a name")))
 				})
 			})
 
@@ -342,8 +342,8 @@ run: {path: a/file}
 				It("returns an error", func() {
 					err := invalidConfig.Validate()
 
-					Expect(err).To(MatchError(ContainSubstring("  input in position 1 is missing a name")))
-					Expect(err).To(MatchError(ContainSubstring("  input in position 2 is missing a name")))
+					Expect(err).To(MatchError(ContainSubstring("input in position 1 is missing a name")))
+					Expect(err).To(MatchError(ContainSubstring("input in position 2 is missing a name")))
 				})
 			})
 		})
@@ -363,7 +363,7 @@ run: {path: a/file}
 				})
 
 				It("returns an error", func() {
-					Expect(invalidConfig.Validate()).To(MatchError(ContainSubstring("  output in position 1 is missing a name")))
+					Expect(invalidConfig.Validate()).To(MatchError(ContainSubstring("output in position 1 is missing a name")))
 				})
 			})
 
@@ -380,8 +380,8 @@ run: {path: a/file}
 				It("returns an error", func() {
 					err := invalidConfig.Validate()
 
-					Expect(err).To(MatchError(ContainSubstring("  output in position 1 is missing a name")))
-					Expect(err).To(MatchError(ContainSubstring("  output in position 2 is missing a name")))
+					Expect(err).To(MatchError(ContainSubstring("output in position 1 is missing a name")))
+					Expect(err).To(MatchError(ContainSubstring("output in position 2 is missing a name")))
 				})
 			})
 		})
@@ -392,10 +392,90 @@ run: {path: a/file}
 			})
 
 			It("returns an error", func() {
-				Expect(invalidConfig.Validate()).To(MatchError(ContainSubstring("  missing path to executable to run")))
+				Expect(invalidConfig.Validate()).To(MatchError(ContainSubstring("missing path to executable to run")))
 			})
 		})
 
 	})
 
+})
+
+var _ = Context("ImageResource", func() {
+	var imageResource *atc.ImageResource
+	var resourceTypes atc.VersionedResourceTypes
+
+	Context("ApplySourceDefaults", func() {
+		BeforeEach(func() {
+			resourceTypes = atc.VersionedResourceTypes{}
+		})
+
+		JustBeforeEach(func() {
+			imageResource.ApplySourceDefaults(resourceTypes)
+		})
+
+		Context("when imageResource is nil", func() {
+			It("should not fail", func() {
+				Expect(imageResource).To(BeNil())
+			})
+		})
+
+		Context("when imageResource is initialized", func() {
+			BeforeEach(func() {
+				imageResource = &atc.ImageResource{
+					Type: "docker",
+					Source: atc.Source{
+						"a":               "b",
+						"evaluated-value": "((task-variable-name))",
+					},
+				}
+			})
+
+			Context("resourceTypes is empty, and no base resource type defaults configured", func() {
+				It("applied source should be identical to the original", func() {
+					Expect(imageResource.Source).To(Equal(atc.Source{
+						"a":               "b",
+						"evaluated-value": "((task-variable-name))",
+					}))
+				})
+			})
+
+			Context("resourceTypes is empty, and base resource type defaults configured", func() {
+				BeforeEach(func() {
+					atc.LoadBaseResourceTypeDefaults(map[string]atc.Source{"docker": atc.Source{"some-key": "some-value"}})
+				})
+				AfterEach(func() {
+					atc.LoadBaseResourceTypeDefaults(map[string]atc.Source{})
+				})
+
+				It("defaults should be added to image source", func() {
+					Expect(imageResource.Source).To(Equal(atc.Source{
+						"a":               "b",
+						"evaluated-value": "((task-variable-name))",
+						"some-key":        "some-value",
+					}))
+				})
+			})
+
+			Context("resourceTypes contains image source type", func() {
+				BeforeEach(func() {
+					resourceTypes = atc.VersionedResourceTypes{
+						{
+							ResourceType: atc.ResourceType{
+								Name:     "docker",
+								Defaults: atc.Source{"some-key": "some-value"},
+							},
+						},
+					}
+				})
+
+				It("defaults should be added to image source", func() {
+					Expect(imageResource.Source).To(Equal(atc.Source{
+						"a":               "b",
+						"evaluated-value": "((task-variable-name))",
+						"some-key":        "some-value",
+					}))
+				})
+			})
+		})
+	})
 })

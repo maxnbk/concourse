@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"github.com/concourse/concourse/atc"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -11,19 +12,23 @@ import (
 	"code.cloudfoundry.org/clock/fakeclock"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
+
 	"github.com/concourse/concourse/atc/api"
 	"github.com/concourse/concourse/atc/api/accessor"
 	"github.com/concourse/concourse/atc/api/accessor/accessorfakes"
 	"github.com/concourse/concourse/atc/api/auth"
 	"github.com/concourse/concourse/atc/api/containerserver/containerserverfakes"
+	"github.com/concourse/concourse/atc/api/policychecker/policycheckerfakes"
 	"github.com/concourse/concourse/atc/auditor/auditorfakes"
 	"github.com/concourse/concourse/atc/creds"
 	"github.com/concourse/concourse/atc/creds/credsfakes"
 	"github.com/concourse/concourse/atc/db"
 	"github.com/concourse/concourse/atc/db/dbfakes"
 	"github.com/concourse/concourse/atc/gc/gcfakes"
+	"github.com/concourse/concourse/atc/policy"
 	"github.com/concourse/concourse/atc/worker/workerfakes"
 	"github.com/concourse/concourse/atc/wrappa"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -56,6 +61,7 @@ var (
 	dbWall                  *dbfakes.FakeWall
 	fakeSecretManager       *credsfakes.FakeSecrets
 	fakeVarSourcePool       *credsfakes.FakeVarSourcePool
+	fakePolicyChecker       *policycheckerfakes.FakePolicyChecker
 	credsManagers           creds.Managers
 	interceptTimeoutFactory *containerserverfakes.FakeInterceptTimeoutFactory
 	interceptTimeout        *containerserverfakes.FakeInterceptTimeout
@@ -112,7 +118,7 @@ var _ = BeforeEach(func() {
 
 	fakeAccess = new(accessorfakes.FakeAccess)
 	fakeAccessor = new(accessorfakes.FakeAccessFactory)
-	fakeAccessor.CreateReturns(fakeAccess)
+	fakeAccessor.CreateReturns(fakeAccess, nil)
 
 	fakePipeline = new(dbfakes.FakePipeline)
 	dbTeam.PipelineReturns(fakePipeline, true, nil)
@@ -154,18 +160,26 @@ var _ = BeforeEach(func() {
 
 	checkWorkerTeamAccessHandlerFactory := auth.NewCheckWorkerTeamAccessHandlerFactory(dbWorkerFactory)
 
-	handler, err := api.NewHandler(
-		logger,
+	fakePolicyChecker = new(policycheckerfakes.FakePolicyChecker)
+	fakePolicyChecker.CheckReturns(policy.PassedPolicyCheck(), nil)
 
-		externalURL,
-		clusterName,
-
+	apiWrapper := wrappa.MultiWrappa{
+		wrappa.NewPolicyCheckWrappa(logger, fakePolicyChecker),
 		wrappa.NewAPIAuthWrappa(
 			checkPipelineAccessHandlerFactory,
 			checkBuildReadAccessHandlerFactory,
 			checkBuildWriteAccessHandlerFactory,
 			checkWorkerTeamAccessHandlerFactory,
 		),
+	}
+
+	handler, err := api.NewHandler(
+		logger,
+
+		externalURL,
+		clusterName,
+
+		apiWrapper,
 
 		dbTeamFactory,
 		dbPipelineFactory,
@@ -198,9 +212,9 @@ var _ = BeforeEach(func() {
 		time.Second,
 		dbWall,
 		fakeClock,
-
-		true, /* enableArchivePipeline */
 	)
+
+	atc.EnablePipelineInstances = true
 
 	Expect(err).NotTo(HaveOccurred())
 
@@ -209,9 +223,6 @@ var _ = BeforeEach(func() {
 		"some-action",
 		handler,
 		fakeAccessor,
-		new(accessorfakes.FakeTokenVerifier),
-		new(accessorfakes.FakeTeamFetcher),
-		new(accessorfakes.FakeUserTracker),
 		new(auditorfakes.FakeAuditor),
 		map[string]string{},
 	)

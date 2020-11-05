@@ -37,7 +37,7 @@ import Html.Lazy
 import Keyboard
 import Login.Login as Login
 import Maybe.Extra
-import Message.Message exposing (DomID(..), Message(..))
+import Message.Message exposing (DomID(..), Message(..), PipelinesSection(..))
 import RemoteData exposing (WebData)
 import Routes exposing (Highlight)
 import ScreenSize
@@ -89,7 +89,7 @@ main =
         Benchmark.describe "benchmark suite"
             [ Benchmark.compare "DashboardPreview.view"
                 "current"
-                (\_ -> DP.view HoverState.NoHover (DP.groupByRank sampleJobs))
+                (\_ -> DP.view AllPipelinesSection HoverState.NoHover (DP.groupByRank sampleJobs))
                 "old"
                 (\_ -> dashboardPreviewView sampleJobs)
             , Benchmark.compare "Build.view"
@@ -134,17 +134,11 @@ buildView session model =
             [ SideBar.hamburgerMenu session
             , TopBar.concourseLogo
             , breadcrumbs model
-            , Login.view session.userState model False
+            , Login.view session.userState model
             ]
         , Html.div
             (id "page-below-top-bar" :: Views.Styles.pageBelowTopBar route)
-            [ SideBar.view
-                { expandedTeams = session.expandedTeams
-                , pipelines = session.pipelines
-                , hovered = session.hovered
-                , isSideBarOpen = session.isSideBarOpen
-                , screenSize = session.screenSize
-                }
+            [ SideBar.view session
                 (currentJob model
                     |> Maybe.map
                         (\j ->
@@ -686,9 +680,15 @@ sampleSession =
     { authToken = ""
     , clusterName = ""
     , csrfToken = ""
-    , expandedTeams = Set.empty
+    , expandedTeamsInAllPipelines = Set.empty
+    , collapsedTeamsInFavorites = Set.empty
+    , favoritedPipelines = Set.empty
     , hovered = HoverState.NoHover
-    , isSideBarOpen = False
+    , sideBarState =
+        { isOpen = False
+        , width = 275
+        }
+    , draggingSideBar = False
     , notFoundImgSrc = ""
     , pipelineRunningKeyframes = ""
     , pipelines = RemoteData.NotAsked
@@ -723,7 +723,7 @@ sampleOldModel =
             , prep = Nothing
             , output =
                 Output
-                    { steps = steps
+                    { steps = stepsModel
                     , state = Build.Output.Models.StepsLiveUpdating
                     , eventSourceOpened = True
                     , eventStreamUrlPath = Nothing
@@ -759,7 +759,7 @@ sampleModel =
     , status = Concourse.BuildStatus.BuildStatusStarted
     , output =
         Output
-            { steps = steps
+            { steps = stepsModel
             , state = Build.Output.Models.StepsLiveUpdating
             , eventSourceOpened = True
             , eventStreamUrlPath = Nothing
@@ -817,7 +817,12 @@ log =
 
 tree : STModels.StepTree
 tree =
-    STModels.Task
+    STModels.Task "stepid"
+
+
+steps : Dict Routes.StepID STModels.Step
+steps =
+    Dict.singleton "stepid"
         { id = "stepid"
         , name = "task_step"
         , state = STModels.StepStateRunning
@@ -826,20 +831,26 @@ tree =
         , expanded = True
         , version = Nothing
         , metadata = []
-        , firstOccurrence = False
+        , changed = False
         , timestamps = Dict.empty
         , initialize = Nothing
         , start = Nothing
         , finish = Nothing
+        , tabFocus = STModels.Auto
+        , expandedHeaders = Dict.empty
+        , initializationExpanded = False
+        , imageCheck = Nothing
+        , imageGet = Nothing
         }
 
 
-steps : Maybe STModels.StepTreeModel
-steps =
+stepsModel : Maybe STModels.StepTreeModel
+stepsModel =
     Just
         { tree = tree
-        , foci = Dict.empty
+        , steps = steps
         , highlight = Routes.HighlightNothing
+        , resources = { inputs = [], outputs = [] }
         }
 
 

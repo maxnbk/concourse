@@ -62,7 +62,7 @@ var _ = Describe("Resolve", func() {
 		team, err := teamFactory.CreateTeam(atc.Team{Name: "algorithm"})
 		Expect(err).NotTo(HaveOccurred())
 
-		pipeline, _, err := team.SavePipeline("algorithm", atc.Config{
+		pipeline, _, err := team.SavePipeline(atc.PipelineRef{Name: "algorithm"}, atc.Config{
 			Resources: atc.ResourceConfigs{
 				{
 					Name: "r1",
@@ -72,10 +72,12 @@ var _ = Describe("Resolve", func() {
 			Jobs: atc.JobConfigs{
 				{
 					Name: "j1",
-					Plan: atc.PlanSequence{
+					PlanSequence: []atc.Step{
 						{
-							Get:      "some-input",
-							Resource: "r1",
+							Config: &atc.GetStep{
+								Name:     "some-input",
+								Resource: "r1",
+							},
 						},
 					},
 				},

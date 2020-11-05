@@ -351,12 +351,47 @@ var _ = Describe("Plan", func() {
 						},
 					},
 					atc.Plan{
-						ID: "37",
+						ID: "38",
 						SetPipeline: &atc.SetPipelinePlan{
-							Name:     "some-pipeline",
-							File:     "some-file",
-							VarFiles: []string{"vf"},
-							Vars:     map[string]interface{}{"k1": "v1"},
+							Name:         "some-pipeline",
+							Team:         "some-team",
+							File:         "some-file",
+							VarFiles:     []string{"vf"},
+							Vars:         map[string]interface{}{"k1": "v1"},
+							InstanceVars: map[string]interface{}{"branch": "feature/foo"},
+						},
+					},
+					atc.Plan{
+						ID: "39",
+						Across: &atc.AcrossPlan{
+							Vars: []atc.AcrossVar{
+								{
+									Var:         "v1",
+									Values:      []interface{}{"a"},
+									MaxInFlight: &atc.MaxInFlightConfig{Limit: 1},
+								},
+								{
+									Var:         "v2",
+									Values:      []interface{}{"b"},
+									MaxInFlight: &atc.MaxInFlightConfig{All: true},
+								},
+							},
+							Steps: []atc.VarScopedPlan{
+								{
+									Step: atc.Plan{
+										ID: "40",
+										Task: &atc.TaskPlan{
+											Name:       "name",
+											ConfigPath: "some/config/path.yml",
+											Config: &atc.TaskConfig{
+												Params: atc.TaskEnv{"some": "secret"},
+											},
+										},
+									},
+									Values: []interface{}{"a", "b"},
+								},
+							},
+							FailFast: true,
 						},
 					},
 				},
@@ -619,9 +654,41 @@ var _ = Describe("Plan", func() {
 	  }
 	},
 	{
-	  "id": "37",
+	  "id": "38",
 	  "set_pipeline": {
-		"name": "some-pipeline"
+		"name": "some-pipeline",
+		"team": "some-team",
+		"instance_vars": {"branch": "feature/foo"}
+	  }
+	},
+	{
+	  "id": "39",
+	  "across": {
+	    "vars": [
+	      {
+	        "name": "v1",
+	        "values": ["a"],
+	        "max_in_flight": 1
+	      },
+	      {
+	        "name": "v2",
+	        "values": ["b"],
+	        "max_in_flight": "all"
+	      }
+	    ],
+	    "steps": [
+	      {
+	        "step": {
+	          "id": "40",
+	          "task": {
+	            "name": "name",
+	            "privileged": false
+	          }
+	        },
+	        "values": ["a", "b"]
+	      }
+	    ],
+	    "fail_fast": true
 	  }
 	}
   ]

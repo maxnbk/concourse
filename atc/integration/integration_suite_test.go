@@ -17,7 +17,6 @@ import (
 	"github.com/concourse/concourse/atc/atccmd"
 	"github.com/concourse/concourse/atc/postgresrunner"
 	"github.com/concourse/concourse/go-concourse/concourse"
-	"github.com/concourse/concourse/skymarshal/token"
 	"github.com/concourse/flag"
 	"github.com/jessevdk/go-flags"
 	"github.com/tedsuo/ifrit"
@@ -123,15 +122,14 @@ func login(atcURL, username, password string) concourse.Client {
 	Expect(err).NotTo(HaveOccurred())
 
 	tokenSource := oauth2.StaticTokenSource(oauthToken)
-	idTokenSource := token.NewTokenSource(tokenSource)
-	httpClient := oauth2.NewClient(ctx, idTokenSource)
+	httpClient := oauth2.NewClient(ctx, tokenSource)
 
 	return concourse.NewClient(atcURL, httpClient, false)
 }
 
 func setupTeam(atcURL string, team atc.Team) {
 	ccClient := login(atcURL, "test", "test")
-	createdTeam, _, _, err := ccClient.Team(team.Name).CreateOrUpdate(team)
+	createdTeam, _, _, _, err := ccClient.Team(team.Name).CreateOrUpdate(team)
 
 	Expect(err).ToNot(HaveOccurred())
 	Expect(createdTeam.Name).To(Equal(team.Name))
@@ -140,6 +138,6 @@ func setupTeam(atcURL string, team atc.Team) {
 
 func setupPipeline(atcURL, teamName string, config []byte) {
 	ccClient := login(atcURL, "test", "test")
-	_, _, _, err := ccClient.Team(teamName).CreateOrUpdatePipelineConfig("pipeline-name", "0", config, false)
+	_, _, _, err := ccClient.Team(teamName).CreateOrUpdatePipelineConfig(atc.PipelineRef{Name: "pipeline-name"}, "0", config, false)
 	Expect(err).ToNot(HaveOccurred())
 }

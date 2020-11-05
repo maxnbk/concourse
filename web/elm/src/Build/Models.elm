@@ -68,7 +68,9 @@ toMaybe currentOutput =
 
 type StepHeaderType
     = StepHeaderPut
-    | StepHeaderGet Bool
+    | StepHeaderCheck
+    | StepHeaderGet
     | StepHeaderTask
     | StepHeaderSetPipeline
     | StepHeaderLoadVar
+    | StepHeaderAcross

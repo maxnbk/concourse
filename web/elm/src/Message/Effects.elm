@@ -1,5 +1,6 @@
 port module Message.Effects exposing
     ( Effect(..)
+    , pipelinesSectionName
     , renderPipeline
     , renderSvgIcon
     , runEffect
@@ -13,7 +14,7 @@ import Assets
 import Base64
 import Browser.Dom exposing (Viewport, getElement, getViewport, getViewportOf, setViewportOf)
 import Browser.Navigation as Navigation
-import Concourse exposing (encodeJob, encodePipeline, encodeTeam)
+import Concourse exposing (DatabaseID, encodeJob, encodePipeline, encodeTeam)
 import Concourse.BuildStatus exposing (BuildStatus)
 import Concourse.Pagination exposing (Page)
 import Json.Decode
@@ -23,6 +24,7 @@ import Message.Callback exposing (Callback(..))
 import Message.Message
     exposing
         ( DomID(..)
+        , PipelinesSection(..)
         , VersionToggleAction(..)
         , VisibilityAction(..)
         )
@@ -30,6 +32,7 @@ import Message.ScrollDirection exposing (ScrollDirection(..))
 import Message.Storage
     exposing
         ( deleteFromLocalStorage
+        , favoritedPipelinesKey
         , jobsKey
         , loadFromLocalStorage
         , loadFromSessionStorage
@@ -42,6 +45,8 @@ import Message.Storage
         )
 import Process
 import Routes
+import Set exposing (Set)
+import SideBar.State exposing (SideBarState, encodeSideBarState)
 import Task
 import Time
 import Views.Styles
@@ -86,6 +91,9 @@ port renderSvgIcon : String -> Cmd msg
 port syncTextareaHeight : String -> Cmd msg
 
 
+port syncStickyBuildLogHeaders : () -> Cmd msg
+
+
 port scrollToId : ( String, String ) -> Cmd msg
 
 
@@ -96,6 +104,10 @@ type alias StickyHeaderConfig =
     , sectionClass : String
     , sectionBodyClass : String
     }
+
+
+type alias DatabaseID =
+    Int
 
 
 stickyHeaderConfig : StickyHeaderConfig
@@ -111,10 +123,10 @@ stickyHeaderConfig =
 type Effect
     = FetchJob Concourse.JobIdentifier
     | FetchJobs Concourse.PipelineIdentifier
-    | FetchJobBuilds Concourse.JobIdentifier (Maybe Page)
+    | FetchJobBuilds Concourse.JobIdentifier Page
     | FetchResource Concourse.ResourceIdentifier
     | FetchCheck Int
-    | FetchVersionedResources Concourse.ResourceIdentifier (Maybe Page)
+    | FetchVersionedResources Concourse.ResourceIdentifier Page
     | FetchResources Concourse.PipelineIdentifier
     | FetchBuildResources Concourse.BuildId
     | FetchPipeline Concourse.PipelineIdentifier
@@ -142,7 +154,7 @@ type Effect
     | PauseJob Concourse.JobIdentifier
     | UnpauseJob Concourse.JobIdentifier
     | ResetPipelineFocus
-    | RenderPipeline Json.Encode.Value Json.Encode.Value
+    | RenderPipeline (List Concourse.Job) (List Concourse.Resource)
     | RedirectToLogin
     | LoadExternal String
     | NavigateTo String
@@ -171,7 +183,7 @@ type Effect
     | ChangeVisibility VisibilityAction Concourse.PipelineIdentifier
     | SaveToken String
     | LoadToken
-    | SaveSideBarState Bool
+    | SaveSideBarState SideBarState
     | LoadSideBarState
     | SaveCachedJobs (List Concourse.Job)
     | LoadCachedJobs
@@ -185,6 +197,9 @@ type Effect
     | GetViewportOf DomID
     | GetElement DomID
     | SyncTextareaHeight DomID
+    | SyncStickyBuildLogHeaders
+    | SaveFavoritedPipelines (Set DatabaseID)
+    | LoadFavoritedPipelines
 
 
 type alias VersionId =
@@ -203,16 +218,17 @@ runEffect effect key csrfToken =
         FetchJobs id ->
             Api.get
                 (Endpoints.PipelineJobsList |> Endpoints.Pipeline id)
-                |> Api.expectJson Json.Decode.value
+                |> Api.expectJson (Json.Decode.list Concourse.decodeJob)
                 |> Api.request
                 |> Task.attempt JobsFetched
 
         FetchJobBuilds id page ->
             Api.paginatedGet
                 (Endpoints.JobBuildsList |> Endpoints.Job id)
-                page
+                (Just page)
                 Concourse.decodeBuild
                 |> Api.request
+                |> Task.map (\b -> ( page, b ))
                 |> Task.attempt JobBuildsFetched
 
         FetchResource id ->
@@ -222,24 +238,24 @@ runEffect effect key csrfToken =
                 |> Task.attempt ResourceFetched
 
         FetchCheck id ->
-            Api.get (Endpoints.Check id)
-                |> Api.expectJson Concourse.decodeCheck
+            Api.get (Endpoints.Build id Endpoints.BaseBuild)
+                |> Api.expectJson Concourse.decodeBuild
                 |> Api.request
                 |> Task.attempt Checked
 
-        FetchVersionedResources id paging ->
+        FetchVersionedResources id page ->
             Api.paginatedGet
                 (Endpoints.ResourceVersionsList |> Endpoints.Resource id)
-                paging
+                (Just page)
                 Concourse.decodeVersionedResource
                 |> Api.request
-                |> Task.map (\b -> ( paging, b ))
+                |> Task.map (\b -> ( page, b ))
                 |> Task.attempt VersionedResourcesFetched
 
         FetchResources id ->
             Api.get
                 (Endpoints.PipelineResourcesList |> Endpoints.Pipeline id)
-                |> Api.expectJson Json.Decode.value
+                |> Api.expectJson (Json.Decode.list Concourse.decodeResource)
                 |> Api.request
                 |> Task.attempt ResourcesFetched
 
@@ -367,7 +383,10 @@ runEffect effect key csrfToken =
             resetPipelineFocus ()
 
         RenderPipeline jobs resources ->
-            renderPipeline ( jobs, resources )
+            renderPipeline
+                ( Json.Encode.list Concourse.encodeJob jobs
+                , Json.Encode.list Concourse.encodeResource resources
+                )
 
         DoPinVersion id ->
             Api.put
@@ -404,7 +423,7 @@ runEffect effect key csrfToken =
                 csrfToken
                 |> Api.withJsonBody
                     (Json.Encode.object [ ( "from", Json.Encode.null ) ])
-                |> Api.expectJson Concourse.decodeCheck
+                |> Api.expectJson Concourse.decodeBuild
                 |> Api.request
                 |> Task.attempt Checked
 
@@ -511,7 +530,7 @@ runEffect effect key csrfToken =
         FetchBuildPlanAndResources buildId ->
             Task.map2 (\a b -> ( a, b ))
                 (Api.get (Endpoints.BuildPlan |> Endpoints.Build buildId)
-                    |> Api.expectJson Concourse.decodeBuildPlan
+                    |> Api.expectJson Concourse.decodeBuildPlanResponse
                     |> Api.request
                 )
                 (Api.get (Endpoints.BuildResourcesList |> Endpoints.Build buildId)
@@ -522,7 +541,7 @@ runEffect effect key csrfToken =
 
         FetchBuildPlan buildId ->
             Api.get (Endpoints.BuildPlan |> Endpoints.Build buildId)
-                |> Api.expectJson Concourse.decodeBuildPlan
+                |> Api.expectJson Concourse.decodeBuildPlanResponse
                 |> Api.request
                 |> Task.map (\p -> ( p, Concourse.emptyBuildResources ))
                 |> Task.attempt (PlanAndResourcesFetched buildId)
@@ -588,8 +607,8 @@ runEffect effect key csrfToken =
         LoadToken ->
             loadFromLocalStorage tokenKey
 
-        SaveSideBarState isOpen ->
-            saveToSessionStorage ( sideBarStateKey, Json.Encode.bool isOpen )
+        SaveSideBarState state ->
+            saveToSessionStorage ( sideBarStateKey, encodeSideBarState state )
 
         LoadSideBarState ->
             loadFromSessionStorage sideBarStateKey
@@ -612,6 +631,15 @@ runEffect effect key csrfToken =
         DeleteCachedPipelines ->
             deleteFromLocalStorage pipelinesKey
 
+        SaveFavoritedPipelines pipelineIDs ->
+            saveToLocalStorage
+                ( favoritedPipelinesKey
+                , pipelineIDs |> Json.Encode.set Json.Encode.int
+                )
+
+        LoadFavoritedPipelines ->
+            loadFromLocalStorage favoritedPipelinesKey
+
         SaveCachedTeams teams ->
             saveToLocalStorage ( teamsKey, teams |> Json.Encode.list encodeTeam )
 
@@ -632,33 +660,53 @@ runEffect effect key csrfToken =
         SyncTextareaHeight domID ->
             syncTextareaHeight (toHtmlID domID)
 
+        SyncStickyBuildLogHeaders ->
+            syncStickyBuildLogHeaders ()
+
+
+pipelinesSectionName : PipelinesSection -> String
+pipelinesSectionName section =
+    case section of
+        FavoritesSection ->
+            "Favorites"
+
+        AllPipelinesSection ->
+            "AllPipelines"
+
 
 toHtmlID : DomID -> String
 toHtmlID domId =
     case domId of
-        SideBarTeam t ->
-            Base64.encode t
+        SideBarTeam section t ->
+            pipelinesSectionName section ++ "_" ++ Base64.encode t
 
-        SideBarPipeline p ->
-            Base64.encode p.teamName ++ "_" ++ Base64.encode p.pipelineName
+        SideBarPipeline section p ->
+            pipelinesSectionName section ++ "_" ++ Base64.encode p.teamName ++ "_" ++ Base64.encode p.pipelineName
 
-        PipelineStatusIcon p ->
-            Base64.encode p.teamName
+        PipelineStatusIcon section p ->
+            pipelinesSectionName section
+                ++ "_"
+                ++ Base64.encode p.teamName
                 ++ "_"
                 ++ Base64.encode p.pipelineName
                 ++ "_status"
 
-        VisibilityButton p ->
-            Base64.encode p.teamName
+        VisibilityButton section p ->
+            pipelinesSectionName section
+                ++ "_"
+                ++ Base64.encode p.teamName
                 ++ "_"
                 ++ Base64.encode p.pipelineName
                 ++ "_visibility"
 
-        FirstOccurrenceGetStepLabel stepID ->
-            stepID ++ "_first_occurrence"
+        ChangedStepLabel stepID _ ->
+            stepID ++ "_changed"
 
         StepState stepID ->
             stepID ++ "_state"
+
+        StepInitialization stepID ->
+            stepID ++ "_image"
 
         Dashboard ->
             "dashboard"
@@ -668,6 +716,9 @@ toHtmlID domId =
 
         ResourceCommentTextarea ->
             "resource_comment"
+
+        TopBarFavoritedIcon _ ->
+            "top-bar-favorited-icon"
 
         _ ->
             ""

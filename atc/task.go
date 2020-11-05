@@ -20,7 +20,7 @@ type TaskConfig struct {
 	ImageResource *ImageResource `json:"image_resource,omitempty"`
 
 	// Limits to set on the Task Container
-	Limits ContainerLimits `json:"container_limits,omitempty"`
+	Limits *ContainerLimits `json:"container_limits,omitempty"`
 
 	// Parameters to pass to the task via environment variables.
 	Params TaskEnv `json:"params,omitempty"`
@@ -38,11 +38,16 @@ type TaskConfig struct {
 	Caches []TaskCacheConfig `json:"caches,omitempty"`
 }
 
-type ContainerLimits struct {
-	CPU    *uint64 `json:"cpu,omitempty"`
-	Memory *uint64 `json:"memory,omitempty"`
+type ImageResource struct {
+	Name    string  `json:"name"`
+	Type    string  `json:"type"`
+	Source  Source  `json:"source"`
+	Version Version `json:"version,omitempty"`
+	Params  Params  `json:"params,omitempty"`
+	Tags    Tags    `json:"tags,omitempty"`
 }
 
+<<<<<<< HEAD
 // UnsafeWorkerOverrides encapsulates configuration applied to all workers,
 // which breaks the isolation between workload and worker.
 type UnsafeWorkerOverrides struct {
@@ -52,9 +57,22 @@ type UnsafeWorkerOverrides struct {
 type ImageResource struct {
 	Type   string `json:"type"`
 	Source Source `json:"source"`
+=======
+func (ir *ImageResource) ApplySourceDefaults(resourceTypes VersionedResourceTypes) {
+	if ir == nil {
+		return
+	}
+>>>>>>> 1bcf09656abe20b2aa23f0fc5da8b19665497c9f
 
-	Params  Params  `json:"params,omitempty"`
-	Version Version `json:"version,omitempty"`
+	parentType, found := resourceTypes.Lookup(ir.Type)
+	if found {
+		ir.Source = parentType.Defaults.Merge(ir.Source)
+	} else {
+		brtDefaults, found := FindBaseResourceTypeDefaults(ir.Type)
+		if found {
+			ir.Source = brtDefaults.Merge(ir.Source)
+		}
+	}
 }
 
 func NewTaskConfig(configBytes []byte) (TaskConfig, error) {
@@ -72,22 +90,32 @@ func NewTaskConfig(configBytes []byte) (TaskConfig, error) {
 	return config, nil
 }
 
+type TaskValidationError struct {
+	Errors []string
+}
+
+func (err TaskValidationError) Error() string {
+	return fmt.Sprintf("invalid task configuration:\n%s", strings.Join(err.Errors, "\n"))
+}
+
 func (config TaskConfig) Validate() error {
-	var messages []string
+	var errors []string
 
 	if config.Platform == "" {
-		messages = append(messages, "  missing 'platform'")
+		errors = append(errors, "missing 'platform'")
 	}
 
 	if config.Run.Path == "" {
-		messages = append(messages, "  missing path to executable to run")
+		errors = append(errors, "missing path to executable to run")
 	}
 
-	messages = append(messages, config.validateInputContainsNames()...)
-	messages = append(messages, config.validateOutputContainsNames()...)
+	errors = append(errors, config.validateInputContainsNames()...)
+	errors = append(errors, config.validateOutputContainsNames()...)
 
-	if len(messages) > 0 {
-		return fmt.Errorf("invalid task configuration:\n%s", strings.Join(messages, "\n"))
+	if len(errors) > 0 {
+		return TaskValidationError{
+			Errors: errors,
+		}
 	}
 
 	return nil

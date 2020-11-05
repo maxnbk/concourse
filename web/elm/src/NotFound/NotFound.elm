@@ -59,18 +59,11 @@ view session model =
             [ SideBar.hamburgerMenu session
             , TopBar.concourseLogo
             , TopBar.breadcrumbs model.route
-            , Login.view session.userState model False
+            , Login.view session.userState model
             ]
         , Html.div
             (id "page-below-top-bar" :: Views.Styles.pageBelowTopBar model.route)
-            [ SideBar.view
-                { expandedTeams = session.expandedTeams
-                , pipelines = session.pipelines
-                , hovered = session.hovered
-                , isSideBarOpen = session.isSideBarOpen
-                , screenSize = session.screenSize
-                }
-                Nothing
+            [ SideBar.view session Nothing
             , Html.div [ class "notfound" ]
                 [ Html.div [ class "title" ] [ Html.text "404" ]
                 , Html.div [ class "reason" ] [ Html.text "this page was not found" ]
